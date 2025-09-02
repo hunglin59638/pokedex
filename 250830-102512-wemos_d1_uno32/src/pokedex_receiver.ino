@@ -9,15 +9,20 @@
 // ESP-NOW and WiFi includes
 #include <esp_now.h>
 #include <WiFi.h>
-#include <esp_wifi.h> // 用於WiFi功率控制
-#include <esp_system.h> // 用於系統監控
+#include <esp_wifi.h>     // 用於WiFi功率控制
+#include <esp_system.h>   // 用於系統監控
 #include <esp_task_wdt.h> // 用於看門狗
 // TFT and graphics
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
 #include <SPI.h>
+// SD card and JSON support (re-enabled for dynamic loading)
+#include <SD.h>
+#include <ArduinoJson.h>
 // Embedded data storage (no SD card needed)
 #include <Arduino.h>
+// Embedded GIF animation support
+#include <AnimatedGIF.h>
 // No more SD card or JSON dependencies!
 
 // 定義TFT引腳 (CS=GPIO5, DC=GPIO2, RST=GPIO4)
@@ -26,33 +31,37 @@
 #define TFT_RST 4
 #define TFT_LED 2 // 背光控制
 
+// 定義SD卡引腳 (重新啟用)
+#define SD_CS 14  // SD卡片選引腳
+
 // 嵌入式Pokemon資料結構
-struct PokemonData {
+struct PokemonData
+{
   int id;
-  const char* name_en;
-  const char* name_zh;
-  const char* type1;
-  const char* type2; // NULL if single type
-  int height;  // in decimeters
-  int weight;  // in hectograms
+  const char *name_en;
+  const char *name_zh;
+  const char *type1;
+  const char *type2; // NULL if single type
+  int height;        // in decimeters
+  int weight;        // in hectograms
 };
 
 // 嵌入在程式記憶體中的Pokemon資料 (PROGMEM)
 const PokemonData PROGMEM pokemon_database[] = {
-  {1, "Bulbasaur", "妙蛙種子", "grass", "poison", 7, 69},
-  {4, "Charmander", "小火龍", "fire", NULL, 6, 85},
-  {6, "Charizard", "噴火龍", "fire", "flying", 17, 905},
-  {7, "Squirtle", "傑尼龜", "water", NULL, 5, 90},
-  {25, "Pikachu", "皮卡丘", "electric", NULL, 4, 60},
-  {94, "Gengar", "耿鬼", "ghost", "poison", 15, 405},
-  {150, "Mewtwo", "超夢", "psychic", NULL, 20, 1220},
-  {151, "Mew", "夢幻", "psychic", NULL, 4, 40}
-};
+    {1, "Bulbasaur", "妙蛙種子", "grass", "poison", 7, 69},
+    {4, "Charmander", "小火龍", "fire", NULL, 6, 85},
+    {6, "Charizard", "噴火龍", "fire", "flying", 17, 905},
+    {7, "Squirtle", "傑尼龜", "water", NULL, 5, 90},
+    {25, "Pikachu", "皮卡丘", "electric", NULL, 4, 60},
+    {94, "Gengar", "耿鬼", "ghost", "poison", 15, 405},
+    {150, "Mewtwo", "超夢", "psychic", NULL, 20, 1220},
+    {151, "Mew", "夢幻", "psychic", NULL, 4, 40}};
 
 const int POKEMON_DATABASE_SIZE = sizeof(pokemon_database) / sizeof(PokemonData);
 
 // 簡化的動畫系統 - 使用精靈動畫替代GIF
-struct PokemonSprite {
+struct PokemonSprite
+{
   int id;
   uint16_t color1; // 主要顏色
   uint16_t color2; // 次要顏色
@@ -61,24 +70,86 @@ struct PokemonSprite {
 
 // 嵌入式精靈資料 (簡化的Pokemon顏色)
 const PokemonSprite PROGMEM pokemon_sprites[] = {
-  {1, 0x07E0, 0x8010, ILI9341_BLACK},   // Bulbasaur: Green, Purple, Black
-  {4, ILI9341_RED, ILI9341_ORANGE, ILI9341_BLACK}, // Charmander: Red, Orange, Black
-  {6, ILI9341_RED, ILI9341_ORANGE, ILI9341_BLUE},  // Charizard: Red, Orange, Blue
-  {7, 0x047F, 0x07FF, ILI9341_BLACK},   // Squirtle: Blue, Cyan, Black  
-  {25, ILI9341_YELLOW, ILI9341_RED, ILI9341_BLACK}, // Pikachu: Yellow, Red, Black
-  {94, 0x4210, 0x8010, ILI9341_RED},    // Gengar: Dark Purple, Purple, Red
-  {150, 0x7BEF, 0x8010, ILI9341_WHITE}, // Mewtwo: Gray, Purple, White
-  {151, 0xFBDF, 0xFFE0, ILI9341_BLUE}   // Mew: Pink, Yellow, Blue
+    {1, 0x07E0, 0x8010, ILI9341_BLACK},               // Bulbasaur: Green, Purple, Black
+    {4, ILI9341_RED, ILI9341_ORANGE, ILI9341_BLACK},  // Charmander: Red, Orange, Black
+    {6, ILI9341_RED, ILI9341_ORANGE, ILI9341_BLUE},   // Charizard: Red, Orange, Blue
+    {7, 0x047F, 0x07FF, ILI9341_BLACK},               // Squirtle: Blue, Cyan, Black
+    {25, ILI9341_YELLOW, ILI9341_RED, ILI9341_BLACK}, // Pikachu: Yellow, Red, Black
+    {94, 0x4210, 0x8010, ILI9341_RED},                // Gengar: Dark Purple, Purple, Red
+    {150, 0x7BEF, 0x8010, ILI9341_WHITE},             // Mewtwo: Gray, Purple, White
+    {151, 0xFBDF, 0xFFE0, ILI9341_BLUE}               // Mew: Pink, Yellow, Blue
 };
 
 const int POKEMON_SPRITES_SIZE = sizeof(pokemon_sprites) / sizeof(PokemonSprite);
 
+// 動態Pokemon資料結構 (從SD卡載入)
+struct DynamicPokemonData {
+  int id;
+  String name_en;
+  String name_zh;
+  String type1;
+  String type2;
+  int height;
+  int weight;
+  bool loaded;
+};
+
+// GIF記憶體緩衝系統 (單一Pokemon的暫存)
+struct GIFBuffer {
+  int pokemon_id;
+  uint8_t* gif_data;
+  size_t gif_size;
+  size_t capacity;
+  bool loaded;
+  
+  GIFBuffer() : pokemon_id(-1), gif_data(nullptr), gif_size(0), capacity(0), loaded(false) {}
+  
+  ~GIFBuffer() {
+    if (gif_data) {
+      free(gif_data);
+      gif_data = nullptr;
+    }
+  }
+  
+  bool allocate(size_t size) {
+    if (gif_data) {
+      free(gif_data);
+    }
+    gif_data = (uint8_t*)malloc(size);
+    if (gif_data) {
+      capacity = size;
+      return true;
+    }
+    capacity = 0;
+    return false;
+  }
+  
+  void clear() {
+    if (gif_data) {
+      free(gif_data);
+      gif_data = nullptr;
+    }
+    pokemon_id = -1;
+    gif_size = 0;
+    capacity = 0;
+    loaded = false;
+  }
+};
+
+// 全域變數：暫存當前Pokemon的資料
+DynamicPokemonData currentPokemon;
+GIFBuffer currentGIF;
+AnimatedGIF gif;
+
 // 查找Pokemon資料的函數
-const PokemonData* findPokemonData(int id) {
-  for (int i = 0; i < POKEMON_DATABASE_SIZE; i++) {
+const PokemonData *findPokemonData(int id)
+{
+  for (int i = 0; i < POKEMON_DATABASE_SIZE; i++)
+  {
     PokemonData data;
     memcpy_P(&data, &pokemon_database[i], sizeof(PokemonData));
-    if (data.id == id) {
+    if (data.id == id)
+    {
       return &pokemon_database[i];
     }
   }
@@ -86,11 +157,14 @@ const PokemonData* findPokemonData(int id) {
 }
 
 // 查找精靈顏色資料
-const PokemonSprite* findPokemonSprite(int id) {
-  for (int i = 0; i < POKEMON_SPRITES_SIZE; i++) {
+const PokemonSprite *findPokemonSprite(int id)
+{
+  for (int i = 0; i < POKEMON_SPRITES_SIZE; i++)
+  {
     PokemonSprite sprite;
     memcpy_P(&sprite, &pokemon_sprites[i], sizeof(PokemonSprite));
-    if (sprite.id == id) {
+    if (sprite.id == id)
+    {
       return &pokemon_sprites[i];
     }
   }
@@ -101,6 +175,17 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 
 // ESP-NOW 相關設定
 #define WIFI_CHANNEL 1 // 與發送端保持一致
+
+// 系統狀態機定義
+enum SystemState {
+  LISTENING,      // ESP-NOW開啟，等待接收Pokemon ID
+  SD_LOADING,     // ESP-NOW關閉，正在從SD卡載入資料
+  DISPLAYING,     // 正在顯示Pokemon資訊和動畫
+  ERROR_RECOVERY  // 錯誤恢復狀態
+};
+
+volatile SystemState currentState = LISTENING;
+unsigned long stateChangeTime = 0; // 記錄狀態改變時間，用於超時檢查
 
 // 定義接收的資料結構 (與發送端一致)
 typedef struct struct_message
@@ -120,9 +205,9 @@ volatile int requestedPokemonId = 0;
 // 無需SPI資源管理，只有TFT使用SPI
 
 // 記憶體管理和系統監控
-#define MIN_FREE_HEAP 50000  // 最小可用記憶體閾值
-#define CRITICAL_HEAP 30000  // 危險記憶體閾值
-#define WDT_TIMEOUT 30       // 看門狗超時時間(秒)
+#define MIN_FREE_HEAP 50000 // 最小可用記憶體閾值
+#define CRITICAL_HEAP 30000 // 危險記憶體閾值
+#define WDT_TIMEOUT 30      // 看門狗超時時間(秒)
 
 // 系統穩定性監控
 volatile unsigned long lastHeartbeat = 0;
@@ -130,97 +215,361 @@ volatile bool systemHealthy = true;
 volatile int consecutiveErrors = 0;
 #define MAX_CONSECUTIVE_ERRORS 3
 
+// 狀態轉換和安全檢查函數
+bool changeSystemState(SystemState newState, const char* reason = "") {
+  if (newState == currentState) {
+    return true; // 已經在目標狀態
+  }
+  
+  Serial.printf("State transition: %d -> %d (%s)\n", currentState, newState, reason);
+  
+  // 檢查狀態轉換的有效性
+  switch (currentState) {
+    case LISTENING:
+      if (newState != SD_LOADING && newState != ERROR_RECOVERY) {
+        Serial.println("Invalid state transition from LISTENING");
+        return false;
+      }
+      break;
+    case SD_LOADING:
+      if (newState != DISPLAYING && newState != ERROR_RECOVERY && newState != LISTENING) {
+        Serial.println("Invalid state transition from SD_LOADING");
+        return false;
+      }
+      break;
+    case DISPLAYING:
+      if (newState != LISTENING && newState != ERROR_RECOVERY) {
+        Serial.println("Invalid state transition from DISPLAYING");
+        return false;
+      }
+      break;
+    case ERROR_RECOVERY:
+      if (newState != LISTENING) {
+        Serial.println("Invalid state transition from ERROR_RECOVERY");
+        return false;
+      }
+      break;
+  }
+  
+  currentState = newState;
+  stateChangeTime = millis();
+  return true;
+}
+
+// 檢查狀態超時
+void checkStateTimeout() {
+  unsigned long timeInState = millis() - stateChangeTime;
+  
+  // SD_LOADING狀態不應該超過10秒
+  if (currentState == SD_LOADING && timeInState > 10000) {
+    Serial.println("SD_LOADING timeout - forcing recovery");
+    changeSystemState(ERROR_RECOVERY, "SD loading timeout");
+  }
+  
+  // ERROR_RECOVERY狀態不應該超過5秒
+  if (currentState == ERROR_RECOVERY && timeInState > 5000) {
+    Serial.println("ERROR_RECOVERY timeout - returning to LISTENING");
+    changeSystemState(LISTENING, "Recovery timeout");
+  }
+}
+
 // 記憶體監控函數
-bool checkMemoryAvailable(const char* operation) {
+bool checkMemoryAvailable(const char *operation)
+{
   size_t freeHeap = ESP.getFreeHeap();
   size_t minHeap = ESP.getMinFreeHeap();
-  
-  Serial.printf("Memory check for %s: %d bytes free (min: %d)\n", 
+
+  Serial.printf("Memory check for %s: %d bytes free (min: %d)\n",
                 operation, freeHeap, minHeap);
-  
-  if (freeHeap < CRITICAL_HEAP) {
+
+  if (freeHeap < CRITICAL_HEAP)
+  {
     Serial.printf("CRITICAL: Memory too low for %s operation!\n", operation);
     return false;
   }
-  
-  if (freeHeap < MIN_FREE_HEAP) {
+
+  if (freeHeap < MIN_FREE_HEAP)
+  {
     Serial.printf("WARNING: Low memory for %s operation\n", operation);
     // 執行垃圾回收
     ESP.getMinFreeHeap(); // Reset min heap counter
   }
-  
+
   return true;
 }
 
 // 系統健康檢查
-void updateSystemHealth() {
+void updateSystemHealth()
+{
   lastHeartbeat = millis();
-  
+
   // 檢查記憶體狀態
   size_t freeHeap = ESP.getFreeHeap();
-  
-  if (freeHeap < CRITICAL_HEAP) {
+
+  if (freeHeap < CRITICAL_HEAP)
+  {
     consecutiveErrors++;
     systemHealthy = false;
     Serial.printf("System health degraded: heap=%d, errors=%d\n", freeHeap, consecutiveErrors);
-  } else {
-    if (consecutiveErrors > 0) {
+  }
+  else
+  {
+    if (consecutiveErrors > 0)
+    {
       consecutiveErrors--;
     }
-    if (consecutiveErrors == 0) {
+    if (consecutiveErrors == 0)
+    {
       systemHealthy = true;
     }
   }
-  
+
   // 如果連續錯誤過多，嘗試系統恢復
-  if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+  if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS)
+  {
     Serial.println("CRITICAL: Too many consecutive errors, initiating recovery");
     performSystemRecovery();
   }
 }
 
 // 系統恢復程序 - 簡化版本（無SD卡）
-void performSystemRecovery() {
+void performSystemRecovery()
+{
   Serial.println("Performing system recovery...");
-  
+
   // 停止所有活動
   displayBusy = true;
   pokemonDisplayRequested = false;
   newDataReceived = false;
-  
+
   // 重置TFT狀態
   digitalWrite(TFT_CS, HIGH);
-  
+
   // 清理記憶體
   ESP.getMinFreeHeap();
-  
+
   // 重新初始化基本功能
   delay(1000);
-  
+
   // 重置錯誤計數器
   consecutiveErrors = 0;
   displayBusy = false;
   systemHealthy = true;
-  
+
   Serial.println("System recovery completed");
 }
 
-// 安全延遲函數，包含系統監控
-void safeDelayWithMemCheck(unsigned long ms, const char* context = "delay") {
-  unsigned long start = millis();
-  while (millis() - start < ms) {
-    yield();
+// ESP-NOW安全控制函數
+bool safelyDisableESPNOW() {
+  Serial.println("Safely disabling ESP-NOW for SD access...");
+  
+  try {
+    // 停止ESP-NOW接收
+    esp_now_deinit();
     
+    // 關閉WiFi模式
+    WiFi.mode(WIFI_OFF);
+    
+    // 等待確保完全關閉
+    delay(100);
+    
+    Serial.println("ESP-NOW disabled successfully");
+    return true;
+  } catch (...) {
+    Serial.println("Error disabling ESP-NOW");
+    return false;
+  }
+}
+
+bool safelyEnableESPNOW() {
+  Serial.println("Re-enabling ESP-NOW...");
+  
+  try {
+    // 重新啟動WiFi
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    
+    // 等待WiFi穩定
+    delay(100);
+    
+    // 重新初始化ESP-NOW
+    if (esp_now_init() != ESP_OK) {
+      Serial.println("Error re-initializing ESP-NOW");
+      return false;
+    }
+    
+    // 重新註冊回調函數
+    esp_now_register_recv_cb(OnDataRecv);
+    
+    Serial.println("ESP-NOW re-enabled successfully");
+    return true;
+  } catch (...) {
+    Serial.println("Error re-enabling ESP-NOW");
+    return false;
+  }
+}
+
+// SD卡安全載入函數 (ESP-NOW已關閉狀態)
+bool loadPokemonFromSD(int pokemon_id) {
+  Serial.printf("Loading Pokemon #%d from SD card (ESP-NOW disabled)\n", pokemon_id);
+  
+  // 確保TFT_CS為高電平，避免SPI衝突
+  digitalWrite(TFT_CS, HIGH);
+  delay(10);
+  
+  // 初始化SD卡
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SD card initialization failed");
+    return false;
+  }
+  
+  // 載入JSON資料
+  if (!loadPokemonJSON(pokemon_id)) {
+    SD.end();
+    return false;
+  }
+  
+  // 載入GIF資料
+  if (!loadPokemonGIF(pokemon_id)) {
+    SD.end();
+    return false;
+  }
+  
+  // 安全關閉SD卡
+  SD.end();
+  digitalWrite(TFT_CS, LOW); // 恢復TFT控制
+  
+  Serial.printf("Pokemon #%d loaded successfully from SD\n", pokemon_id);
+  return true;
+}
+
+// 載入Pokemon JSON資料
+bool loadPokemonJSON(int pokemon_id) {
+  String jsonPath = "/pokemon/" + String(pokemon_id) + ".json";
+  
+  File jsonFile = SD.open(jsonPath);
+  if (!jsonFile) {
+    Serial.printf("Failed to open JSON file: %s\n", jsonPath.c_str());
+    return false;
+  }
+  
+  // 讀取JSON內容
+  String jsonContent = "";
+  while (jsonFile.available()) {
+    jsonContent += (char)jsonFile.read();
+  }
+  jsonFile.close();
+  
+  // 解析JSON
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, jsonContent);
+  
+  if (error) {
+    Serial.printf("JSON parsing failed: %s\n", error.c_str());
+    return false;
+  }
+  
+  // 提取Pokemon資料
+  currentPokemon.id = pokemon_id;
+  currentPokemon.name_en = doc["name"]["english"].as<String>();
+  currentPokemon.name_zh = doc["name"]["chinese"].as<String>();
+  
+  JsonArray types = doc["type"];
+  if (types.size() > 0) {
+    currentPokemon.type1 = types[0].as<String>();
+  }
+  if (types.size() > 1) {
+    currentPokemon.type2 = types[1].as<String>();
+  } else {
+    currentPokemon.type2 = "";
+  }
+  
+  currentPokemon.height = doc["base"]["Height"].as<int>();
+  currentPokemon.weight = doc["base"]["Weight"].as<int>();
+  currentPokemon.loaded = true;
+  
+  Serial.printf("Loaded Pokemon JSON: %s (%s)\n", 
+                currentPokemon.name_en.c_str(), 
+                currentPokemon.name_zh.c_str());
+  
+  return true;
+}
+
+// 載入Pokemon GIF資料到記憶體緩衝區
+bool loadPokemonGIF(int pokemon_id) {
+  String gifPath = "/pokemon/" + String(pokemon_id) + ".gif";
+  
+  File gifFile = SD.open(gifPath);
+  if (!gifFile) {
+    Serial.printf("Failed to open GIF file: %s\n", gifPath.c_str());
+    return false;
+  }
+  
+  size_t gifSize = gifFile.size();
+  Serial.printf("GIF file size: %d bytes\n", gifSize);
+  
+  // 檢查記憶體是否足夠
+  size_t freeHeap = ESP.getFreeHeap();
+  if (freeHeap < gifSize + 50000) { // 保留50KB緩衝
+    Serial.printf("Insufficient memory for GIF (need %d, have %d)\n", gifSize, freeHeap);
+    gifFile.close();
+    return false;
+  }
+  
+  // 分配記憶體緩衝區
+  if (!currentGIF.allocate(gifSize)) {
+    Serial.println("Failed to allocate GIF buffer");
+    gifFile.close();
+    return false;
+  }
+  
+  // 讀取GIF資料到記憶體
+  size_t bytesRead = 0;
+  while (gifFile.available() && bytesRead < gifSize) {
+    int bytesToRead = min(1024, (int)(gifSize - bytesRead));
+    int actualRead = gifFile.read(currentGIF.gif_data + bytesRead, bytesToRead);
+    if (actualRead <= 0) {
+      break;
+    }
+    bytesRead += actualRead;
+  }
+  
+  gifFile.close();
+  
+  if (bytesRead != gifSize) {
+    Serial.printf("GIF read error: expected %d bytes, got %d\n", gifSize, bytesRead);
+    currentGIF.clear();
+    return false;
+  }
+  
+  currentGIF.pokemon_id = pokemon_id;
+  currentGIF.gif_size = gifSize;
+  currentGIF.loaded = true;
+  
+  Serial.printf("Loaded GIF to memory: %d bytes\n", gifSize);
+  return true;
+}
+
+// 安全延遲函數，包含系統監控
+void safeDelayWithMemCheck(unsigned long ms, const char *context = "delay")
+{
+  unsigned long start = millis();
+  while (millis() - start < ms)
+  {
+    yield();
+
     // 餵看門狗
     esp_task_wdt_reset();
-    
+
     delay(10);
-    
+
     // 每500ms檢查一次系統狀態
-    if ((millis() - start) % 500 == 0) {
+    if ((millis() - start) % 500 == 0)
+    {
       updateSystemHealth();
-      
-      if (!systemHealthy) {
+
+      if (!systemHealthy)
+      {
         Serial.printf("System unhealthy during %s\n", context);
         break;
       }
@@ -228,17 +577,23 @@ void safeDelayWithMemCheck(unsigned long ms, const char* context = "delay") {
   }
 }
 
-// 安全的ESP-NOW接收回調函數 - 僅設置標誌，不進行任何重操作
+// 安全的ESP-NOW接收回調函數 - 狀態機版本
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
-  // 在中斷上下文中只進行最基本的操作
+  // 只在LISTENING狀態才處理新請求
+  if (currentState != LISTENING) {
+    // 系統正忙，忽略請求 (不在中斷中印出訊息)
+    return;
+  }
+  
+  // 檢查資料長度和系統狀態
   if (len == sizeof(struct_message) && !displayBusy) {
     memcpy(&receivedData, incomingData, sizeof(receivedData));
     requestedPokemonId = receivedData.pokemon_id;
     pokemonDisplayRequested = true;
     newDataReceived = true;
   }
-  
+
   // 避免在中斷中進行Serial輸出
 }
 
@@ -274,26 +629,31 @@ const TypeColor typeColors[] = {
 
 // Pokemon精靈動畫系統 (替代GIF)
 // Helper function to draw a filled ellipse using circles
-void fillEllipse(int16_t centerX, int16_t centerY, int16_t width, int16_t height, uint16_t color) {
+void fillEllipse(int16_t centerX, int16_t centerY, int16_t width, int16_t height, uint16_t color)
+{
   int16_t radiusX = width / 2;
   int16_t radiusY = height / 2;
-  
+
   // Draw ellipse by drawing multiple circles with varying radii
-  for (int16_t y = -radiusY; y <= radiusY; y++) {
+  for (int16_t y = -radiusY; y <= radiusY; y++)
+  {
     int16_t x = (int16_t)(radiusX * sqrt(1.0 - (float)(y * y) / (radiusY * radiusY)));
-    if (x > 0) {
+    if (x > 0)
+    {
       tft.drawFastHLine(centerX - x, centerY + y, 2 * x, color);
     }
   }
 }
 
 // Helper function to draw an ellipse outline using circles
-void drawEllipse(int16_t centerX, int16_t centerY, int16_t width, int16_t height, uint16_t color) {
+void drawEllipse(int16_t centerX, int16_t centerY, int16_t width, int16_t height, uint16_t color)
+{
   int16_t radiusX = width / 2;
   int16_t radiusY = height / 2;
-  
+
   // Draw ellipse outline by drawing points at calculated positions
-  for (int angle = 0; angle < 360; angle += 5) {
+  for (int angle = 0; angle < 360; angle += 5)
+  {
     float rad = angle * PI / 180.0;
     int16_t x = centerX + (int16_t)(radiusX * cos(rad));
     int16_t y = centerY + (int16_t)(radiusY * sin(rad));
@@ -305,30 +665,32 @@ void drawSimplePokemonSprite(int16_t x, int16_t y, int16_t size, uint16_t color1
 {
   // 簡單的精靈動畫 - 3幀動畫效果
   int16_t offset = (frame % 3 - 1) * 2; // -2, 0, +2 像素偏移
-  
+
   // 主體 (橢圓形)
   int16_t bodyWidth = size;
   int16_t bodyHeight = size * 0.8;
-  
+
   fillEllipse(x, y + offset, bodyWidth, bodyHeight, color1);
-  
+
   // 陰影/邊框
   drawEllipse(x, y + offset, bodyWidth, bodyHeight, ILI9341_BLACK);
   drawEllipse(x, y + offset, bodyWidth - 1, bodyHeight - 1, color2);
-  
+
   // 眼睛 (簡單的點)
   int16_t eyeY = y - bodyHeight / 4 + offset;
   tft.fillCircle(x - bodyWidth / 4, eyeY, 3, color3);
   tft.fillCircle(x + bodyWidth / 4, eyeY, 3, color3);
-  
+
   // 眼睛高光
   tft.fillCircle(x - bodyWidth / 4, eyeY - 1, 1, ILI9341_WHITE);
   tft.fillCircle(x + bodyWidth / 4, eyeY - 1, 1, ILI9341_WHITE);
-  
+
   // 嘴巴 (小弧線)
   int16_t mouthY = y + bodyHeight / 6 + offset;
-  for (int i = -3; i <= 3; i++) {
-    if (abs(i) <= 2) { // 創建弧形
+  for (int i = -3; i <= 3; i++)
+  {
+    if (abs(i) <= 2)
+    { // 創建弧形
       tft.drawPixel(x + i, mouthY + abs(i) / 2, color3);
     }
   }
@@ -337,186 +699,208 @@ void drawSimplePokemonSprite(int16_t x, int16_t y, int16_t size, uint16_t color1
 // 播放Pokemon精靈動畫
 void playPokemonSpriteAnimation(int id, int16_t areaX, int16_t areaY, int16_t areaWidth, int16_t areaHeight, int duration_ms = 3000)
 {
-  const PokemonSprite* sprite = findPokemonSprite(id);
-  if (!sprite) {
+  const PokemonSprite *sprite = findPokemonSprite(id);
+  if (!sprite)
+  {
     Serial.printf("No sprite data for Pokemon ID %d\n", id);
     return;
   }
-  
+
   // 從PROGMEM讀取精靈資料
   PokemonSprite spriteData;
   memcpy_P(&spriteData, sprite, sizeof(PokemonSprite));
-  
+
   Serial.printf("Playing sprite animation for Pokemon #%d\n", id);
-  
+
   // 計算精靈大小和位置
   int16_t spriteSize = min(areaWidth, areaHeight) / 2;
   int16_t spriteX = areaX + areaWidth / 2;
   int16_t spriteY = areaY + areaHeight / 2;
-  
+
   unsigned long startTime = millis();
   int frame = 0;
-  
-  while (millis() - startTime < duration_ms) {
+
+  while (millis() - startTime < duration_ms)
+  {
     // 清除動畫區域
     tft.fillRect(areaX, areaY, areaWidth, areaHeight, ILI9341_BLACK);
-    
+
     // 繪製精靈動畫幀
-    drawSimplePokemonSprite(spriteX, spriteY, spriteSize, 
-                           spriteData.color1, spriteData.color2, spriteData.color3, frame);
-    
+    drawSimplePokemonSprite(spriteX, spriteY, spriteSize,
+                            spriteData.color1, spriteData.color2, spriteData.color3, frame);
+
     // 更新幀計數器
     frame++;
-    
+
     // 控制動畫速度 (約10 FPS)
     delay(100);
-    
+
     // 餵看門狗
     esp_task_wdt_reset();
   }
-  
+
   Serial.printf("Sprite animation completed for Pokemon #%d\n", id);
 }
 
 // Enhanced Pokemon animation with particle effects and sparkles
 void playEnhancedPokemonAnimation(int id, int16_t areaX, int16_t areaY, int16_t areaWidth, int16_t areaHeight, int duration_ms = 3000)
 {
-  const PokemonSprite* sprite = findPokemonSprite(id);
-  if (!sprite) {
+  const PokemonSprite *sprite = findPokemonSprite(id);
+  if (!sprite)
+  {
     Serial.printf("No sprite data for Pokemon ID %d, using basic animation\n", id);
     playPokemonSpriteAnimation(id, areaX, areaY, areaWidth, areaHeight, duration_ms);
     return;
   }
-  
+
   // 從PROGMEM讀取精靈資料
   PokemonSprite spriteData;
   memcpy_P(&spriteData, sprite, sizeof(PokemonSprite));
-  
+
   Serial.printf("Playing enhanced animation for Pokemon #%d\n", id);
-  
+
   // 計算精靈大小和位置
   int16_t spriteSize = min(areaWidth, areaHeight) / 2;
   int16_t spriteX = areaX + areaWidth / 2;
   int16_t spriteY = areaY + areaHeight / 2;
-  
+
   // Particle system for sparkle effects
-  struct Particle {
+  struct Particle
+  {
     int16_t x, y;
     int16_t vx, vy;
     uint16_t color;
     int life;
   };
-  
+
   const int MAX_PARTICLES = 8;
   Particle particles[MAX_PARTICLES];
-  
+
   // Initialize particles
-  for (int i = 0; i < MAX_PARTICLES; i++) {
+  for (int i = 0; i < MAX_PARTICLES; i++)
+  {
     particles[i].life = 0;
   }
-  
+
   unsigned long startTime = millis();
   int frame = 0;
-  
-  while (millis() - startTime < duration_ms) {
+
+  while (millis() - startTime < duration_ms)
+  {
     // 清除動畫區域
     tft.fillRect(areaX, areaY, areaWidth, areaHeight, ILI9341_BLACK);
-    
+
     // Add sparkle particles periodically
-    if (frame % 8 == 0) {
-      for (int i = 0; i < MAX_PARTICLES; i++) {
-        if (particles[i].life <= 0) {
+    if (frame % 8 == 0)
+    {
+      for (int i = 0; i < MAX_PARTICLES; i++)
+      {
+        if (particles[i].life <= 0)
+        {
           particles[i].x = spriteX + random(-spriteSize, spriteSize);
           particles[i].y = spriteY + random(-spriteSize, spriteSize);
           particles[i].vx = random(-3, 3);
           particles[i].vy = random(-3, 3);
-          particles[i].color = (random(0, 3) == 0) ? ILI9341_YELLOW : 
-                              (random(0, 2) == 0) ? ILI9341_CYAN : ILI9341_WHITE;
+          particles[i].color = (random(0, 3) == 0) ? ILI9341_YELLOW : (random(0, 2) == 0) ? ILI9341_CYAN
+                                                                                          : ILI9341_WHITE;
           particles[i].life = 20 + random(0, 20);
           break;
         }
       }
     }
-    
+
     // Update and draw particles
-    for (int i = 0; i < MAX_PARTICLES; i++) {
-      if (particles[i].life > 0) {
+    for (int i = 0; i < MAX_PARTICLES; i++)
+    {
+      if (particles[i].life > 0)
+      {
         particles[i].x += particles[i].vx;
         particles[i].y += particles[i].vy;
         particles[i].life--;
-        
+
         // Fade effect
-        if (particles[i].life > 10) {
+        if (particles[i].life > 10)
+        {
           tft.drawPixel(particles[i].x, particles[i].y, particles[i].color);
           tft.drawPixel(particles[i].x + 1, particles[i].y, particles[i].color);
           tft.drawPixel(particles[i].x, particles[i].y + 1, particles[i].color);
-        } else if (particles[i].life > 5) {
+        }
+        else if (particles[i].life > 5)
+        {
           tft.drawPixel(particles[i].x, particles[i].y, particles[i].color);
         }
       }
     }
-    
+
     // 繪製精靈動畫幀 with enhanced effects
-    drawSimplePokemonSprite(spriteX, spriteY, spriteSize, 
-                           spriteData.color1, spriteData.color2, spriteData.color3, frame);
-    
+    drawSimplePokemonSprite(spriteX, spriteY, spriteSize,
+                            spriteData.color1, spriteData.color2, spriteData.color3, frame);
+
     // Add glow effect around sprite every few frames
-    if (frame % 15 == 0) {
-      for (int r = spriteSize + 5; r < spriteSize + 15; r += 2) {
+    if (frame % 15 == 0)
+    {
+      for (int r = spriteSize + 5; r < spriteSize + 15; r += 2)
+      {
         tft.drawCircle(spriteX, spriteY, r, spriteData.color1);
         delay(30);
         tft.drawCircle(spriteX, spriteY, r, ILI9341_BLACK);
       }
     }
-    
+
     // 更新幀計數器
     frame++;
-    
+
     // 控制動畫速度 (約12 FPS for smoother effects)
     delay(80);
-    
+
     // 餵看門狗
     esp_task_wdt_reset();
   }
-  
+
   // Final sparkle burst
-  for (int burst = 0; burst < 20; burst++) {
+  for (int burst = 0; burst < 20; burst++)
+  {
     int16_t sparkleX = spriteX + random(-spriteSize * 2, spriteSize * 2);
     int16_t sparkleY = spriteY + random(-spriteSize * 2, spriteSize * 2);
-    uint16_t sparkleColor = (random(0, 3) == 0) ? ILI9341_YELLOW : 
-                           (random(0, 2) == 0) ? ILI9341_CYAN : ILI9341_WHITE;
-    
+    uint16_t sparkleColor = (random(0, 3) == 0) ? ILI9341_YELLOW : (random(0, 2) == 0) ? ILI9341_CYAN
+                                                                                       : ILI9341_WHITE;
+
     tft.fillCircle(sparkleX, sparkleY, 2, sparkleColor);
     delay(50);
     tft.fillCircle(sparkleX, sparkleY, 2, ILI9341_BLACK);
   }
-  
+
   Serial.printf("Enhanced animation completed for Pokemon #%d\n", id);
 }
 
 // 簡化的顯示器管理 - 無需SPI競爭（只有TFT）
-bool acquireDisplay(const char* requester) {
-  if (displayBusy) {
+bool acquireDisplay(const char *requester)
+{
+  if (displayBusy)
+  {
     Serial.printf("Display busy, waiting for %s\n", requester);
     int attempts = 0;
-    while (displayBusy && attempts < 50) {
+    while (displayBusy && attempts < 50)
+    {
       delay(10);
       attempts++;
       esp_task_wdt_reset(); // 餵看門狗
     }
-    
-    if (displayBusy) {
+
+    if (displayBusy)
+    {
       Serial.printf("Display timeout for %s, forcing release\n", requester);
       displayBusy = false; // 強制釋放
     }
   }
-  
+
   displayBusy = true;
   Serial.printf("Display acquired by %s\n", requester);
   return true;
 }
 
-void releaseDisplay(const char* requester) {
+void releaseDisplay(const char *requester)
+{
   displayBusy = false;
   Serial.printf("Display released by %s\n", requester);
 }
@@ -571,39 +955,43 @@ void drawPokemonBall(int16_t centerX, int16_t centerY, int16_t radius)
   uint16_t whiteColor = ILI9341_WHITE;
   uint16_t blackColor = ILI9341_BLACK;
   uint16_t grayColor = 0x7BEF; // Light gray
-  
+
   // Draw outer circle (black border)
   tft.drawCircle(centerX, centerY, radius, blackColor);
   tft.drawCircle(centerX, centerY, radius - 1, blackColor);
-  
+
   // Draw upper half (red)
-  for (int16_t y = centerY - radius + 2; y < centerY - 2; y++) {
+  for (int16_t y = centerY - radius + 2; y < centerY - 2; y++)
+  {
     int16_t halfWidth = (int16_t)sqrt(radius * radius - (y - centerY) * (y - centerY)) - 2;
-    if (halfWidth > 0) {
+    if (halfWidth > 0)
+    {
       tft.drawFastHLine(centerX - halfWidth, y, halfWidth * 2, redColor);
     }
   }
-  
-  // Draw lower half (white) 
-  for (int16_t y = centerY + 3; y < centerY + radius - 2; y++) {
+
+  // Draw lower half (white)
+  for (int16_t y = centerY + 3; y < centerY + radius - 2; y++)
+  {
     int16_t halfWidth = (int16_t)sqrt(radius * radius - (y - centerY) * (y - centerY)) - 2;
-    if (halfWidth > 0) {
+    if (halfWidth > 0)
+    {
       tft.drawFastHLine(centerX - halfWidth, y, halfWidth * 2, whiteColor);
     }
   }
-  
+
   // Draw middle band (black)
   tft.drawFastHLine(centerX - radius + 2, centerY - 2, (radius - 2) * 2, blackColor);
   tft.drawFastHLine(centerX - radius + 2, centerY - 1, (radius - 2) * 2, blackColor);
   tft.drawFastHLine(centerX - radius + 2, centerY, (radius - 2) * 2, blackColor);
   tft.drawFastHLine(centerX - radius + 2, centerY + 1, (radius - 2) * 2, blackColor);
   tft.drawFastHLine(centerX - radius + 2, centerY + 2, (radius - 2) * 2, blackColor);
-  
+
   // Draw center button (white circle with black border)
   int16_t buttonRadius = radius / 4;
   tft.fillCircle(centerX, centerY, buttonRadius + 2, blackColor);
   tft.fillCircle(centerX, centerY, buttonRadius, whiteColor);
-  
+
   // Add inner button detail
   tft.drawCircle(centerX, centerY, buttonRadius - 2, grayColor);
 }
@@ -612,12 +1000,14 @@ void drawPokemonBall(int16_t centerX, int16_t centerY, int16_t radius)
 void fadeToBlack(int steps = 10)
 {
   // Simple fade-to-black effect by drawing increasingly dark rectangles
-  for (int i = 0; i < steps; i++) {
+  for (int i = 0; i < steps; i++)
+  {
     // Create a semi-transparent overlay effect by drawing with different patterns
     uint16_t fadeColor = ILI9341_BLACK;
-    
+
     // Draw diagonal lines for fade effect
-    for (int y = i; y < 320; y += steps) {
+    for (int y = i; y < 320; y += steps)
+    {
       tft.drawFastHLine(0, y, 240, fadeColor);
     }
     delay(30);
@@ -629,22 +1019,23 @@ void fadeToBlack(int steps = 10)
 void transitionFromWelcomeScreen()
 {
   Serial.println("Starting smooth transition from welcome screen");
-  
+
   // Animate Pokemon Ball shrinking
   int16_t ballCenterX = tft.width() / 2;
   int16_t ballCenterY = 120;
-  
-  for (int radius = 60; radius > 10; radius -= 5) {
+
+  for (int radius = 60; radius > 10; radius -= 5)
+  {
     // Clear area around ball
     tft.fillCircle(ballCenterX, ballCenterY, radius + 10, ILI9341_BLACK);
-    
+
     // Draw smaller ball
     drawPokemonBall(ballCenterX, ballCenterY, radius);
-    
+
     delay(50);
     esp_task_wdt_reset();
   }
-  
+
   // Final fade
   fadeToBlack(5);
   Serial.println("Transition completed");
@@ -654,57 +1045,61 @@ void transitionFromWelcomeScreen()
 void displayPokemonBallWelcome()
 {
   Serial.println("Displaying Pokemon Ball welcome screen");
-  
+
   // Clear screen with black background
   tft.fillScreen(ILI9341_BLACK);
-  
+
   // Title text with fade-in effect
   tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(2);
   int16_t titleY = 30;
   String title = "POKEDEX";
   int16_t titleX = (tft.width() - title.length() * 12) / 2;
-  
+
   // Fade in title character by character
-  for (int i = 0; i < title.length(); i++) {
+  for (int i = 0; i < title.length(); i++)
+  {
     tft.setCursor(titleX + i * 12, titleY);
     tft.print(title.charAt(i));
     delay(100);
   }
-  
+
   delay(300);
-  
+
   // Draw Pokemon Ball with animation
   int16_t ballCenterX = tft.width() / 2;
   int16_t ballCenterY = 120;
   int16_t ballRadius = 60;
-  
+
   // Animate ball growing from center
-  for (int radius = 5; radius <= ballRadius; radius += 3) {
+  for (int radius = 5; radius <= ballRadius; radius += 3)
+  {
     drawPokemonBall(ballCenterX, ballCenterY, radius);
     delay(30);
     esp_task_wdt_reset();
   }
-  
+
   // Subtitle with typewriter effect
   tft.setTextSize(1);
   int16_t subtitleY = 210;
   String subtitle = "NFC Pokemon Scanner";
   int16_t subtitleX = (tft.width() - subtitle.length() * 6) / 2;
-  
-  for (int i = 0; i < subtitle.length(); i++) {
+
+  for (int i = 0; i < subtitle.length(); i++)
+  {
     tft.setCursor(subtitleX + i * 6, subtitleY);
     tft.print(subtitle.charAt(i));
     delay(80);
   }
-  
+
   // System info with color animation
   tft.setTextSize(1);
   tft.setCursor(10, 240);
-  
+
   // Cycle through colors for system info
   uint16_t colors[] = {ILI9341_CYAN, ILI9341_GREEN, ILI9341_YELLOW};
-  for (int c = 0; c < 3; c++) {
+  for (int c = 0; c < 3; c++)
+  {
     tft.fillRect(10, 240, 220, 16, ILI9341_BLACK);
     tft.setTextColor(colors[c]);
     tft.setCursor(10, 240);
@@ -713,19 +1108,20 @@ void displayPokemonBallWelcome()
     tft.print(" Pokemon Ready!");
     delay(300);
   }
-  
+
   // Final pulsing effect on Pokemon Ball
-  for (int pulse = 0; pulse < 3; pulse++) {
+  for (int pulse = 0; pulse < 3; pulse++)
+  {
     // Brighten
     tft.drawCircle(ballCenterX, ballCenterY, ballRadius + 2, ILI9341_YELLOW);
     delay(200);
-    
+
     // Return to normal
     tft.drawCircle(ballCenterX, ballCenterY, ballRadius + 2, ILI9341_BLACK);
     delay(200);
     esp_task_wdt_reset();
   }
-  
+
   Serial.println("Enhanced Pokemon Ball welcome screen displayed");
 }
 
@@ -733,20 +1129,23 @@ void displayPokemonBallWelcome()
 bool displayPokemonInfo(int id)
 {
   Serial.printf("Displaying Pokemon info for ID %d (embedded data)\n", id);
-  
-  if (!checkMemoryAvailable("displayPokemonInfo")) {
+
+  if (!checkMemoryAvailable("displayPokemonInfo"))
+  {
     Serial.println("Memory check failed for displayPokemonInfo");
     return false;
   }
-  
-  if (!acquireDisplay("displayPokemonInfo")) {
+
+  if (!acquireDisplay("displayPokemonInfo"))
+  {
     Serial.println("Failed to acquire display for displayPokemonInfo");
     return false;
   }
 
   // 從嵌入式資料庫查找Pokemon
-  const PokemonData* pokemon = findPokemonData(id);
-  if (!pokemon) {
+  const PokemonData *pokemon = findPokemonData(id);
+  if (!pokemon)
+  {
     Serial.printf("Pokemon ID %d not found in embedded database\n", id);
     releaseDisplay("displayPokemonInfo");
     return false;
@@ -755,7 +1154,7 @@ bool displayPokemonInfo(int id)
   // 從PROGMEM讀取資料
   PokemonData data;
   memcpy_P(&data, pokemon, sizeof(PokemonData));
-  
+
   Serial.printf("Found Pokemon: %s (ID: %d)\n", data.name_en, data.id);
 
   // 無需SPI競爭 - 只有TFT使用SPI
@@ -769,7 +1168,7 @@ bool displayPokemonInfo(int id)
   tft.setTextSize(2);
   char idText[16];
   snprintf(idText, sizeof(idText), "#%d", data.id);
-  
+
   int16_t idX = (tft.width() - strlen(idText) * 12) / 2;
   tft.setCursor(idX, 20);
   tft.print(idText);
@@ -822,17 +1221,20 @@ bool displayPokemonInfo(int id)
   int badgeHeight = 20;
   int badgeSpacing = 10;
 
-  if (data.type2) {
+  if (data.type2)
+  {
     // Two types
     int totalWidth = 2 * badgeWidth + badgeSpacing;
     int startX = (tft.width() - totalWidth) / 2;
-    
+
     uint16_t type1Color = getTypeColor(data.type1);
     uint16_t type2Color = getTypeColor(data.type2);
-    
+
     drawTypeBadge(startX, badgeY, badgeWidth, badgeHeight, data.type1, type1Color);
     drawTypeBadge(startX + badgeWidth + badgeSpacing, badgeY, badgeWidth, badgeHeight, data.type2, type2Color);
-  } else {
+  }
+  else
+  {
     // Single type
     int startX = (tft.width() - badgeWidth) / 2;
     uint16_t typeColor = getTypeColor(data.type1);
@@ -840,7 +1242,7 @@ bool displayPokemonInfo(int id)
   }
 
   releaseDisplay("displayPokemonInfo");
-  
+
   Serial.println("Pokemon info displayed successfully (no SD card needed!)");
   return true;
 }
@@ -849,30 +1251,32 @@ bool displayPokemonInfo(int id)
 void showPokemonScanAnimation()
 {
   Serial.println("Showing Pokemon scan animation");
-  
+
   // Show scanning effect
   int16_t centerX = tft.width() / 2;
   int16_t centerY = 160;
-  
+
   // Expanding circles effect
-  for (int radius = 10; radius < 100; radius += 15) {
+  for (int radius = 10; radius < 100; radius += 15)
+  {
     tft.drawCircle(centerX, centerY, radius, ILI9341_CYAN);
     delay(100);
     tft.drawCircle(centerX, centerY, radius, ILI9341_BLACK); // Erase
     esp_task_wdt_reset();
   }
-  
+
   // Scanning text effect
   tft.setTextColor(ILI9341_YELLOW);
   tft.setTextSize(2);
   String scanText = "SCANNING...";
   int16_t textX = (tft.width() - scanText.length() * 12) / 2;
-  
-  for (int i = 0; i < 3; i++) {
+
+  for (int i = 0; i < 3; i++)
+  {
     tft.setCursor(textX, centerY - 10);
     tft.print(scanText);
     delay(300);
-    
+
     // Flash effect
     tft.fillRect(textX, centerY - 10, scanText.length() * 12, 16, ILI9341_BLACK);
     delay(200);
@@ -880,41 +1284,361 @@ void showPokemonScanAnimation()
   }
 }
 
+// 載入畫面顯示函數
+void showLoadingScreen(int pokemon_id) {
+  Serial.printf("Showing loading screen for Pokemon #%d\n", pokemon_id);
+  
+  // 清除螢幕
+  tft.fillScreen(ILI9341_BLACK);
+  
+  // 顯示Pokemon ID
+  tft.setTextColor(ILI9341_CYAN);
+  tft.setTextSize(3);
+  String idText = "Pokemon #" + String(pokemon_id);
+  int16_t idX = (tft.width() - idText.length() * 18) / 2;
+  tft.setCursor(idX, 60);
+  tft.print(idText);
+  
+  // 顯示載入文字
+  tft.setTextColor(ILI9341_YELLOW);
+  tft.setTextSize(2);
+  String loadingText = "Loading from SD...";
+  int16_t loadingX = (tft.width() - loadingText.length() * 12) / 2;
+  tft.setCursor(loadingX, 120);
+  tft.print(loadingText);
+  
+  // 載入進度條動畫
+  int16_t barWidth = 200;
+  int16_t barHeight = 10;
+  int16_t barX = (tft.width() - barWidth) / 2;
+  int16_t barY = 160;
+  
+  // 進度條外框
+  tft.drawRect(barX - 2, barY - 2, barWidth + 4, barHeight + 4, ILI9341_WHITE);
+  
+  // 動畫載入條
+  for (int progress = 0; progress <= 100; progress += 10) {
+    int16_t fillWidth = (barWidth * progress) / 100;
+    tft.fillRect(barX, barY, fillWidth, barHeight, ILI9341_GREEN);
+    
+    // 顯示百分比
+    tft.fillRect(barX, barY + 20, 60, 16, ILI9341_BLACK);
+    tft.setTextSize(1);
+    tft.setCursor(barX, barY + 20);
+    tft.printf("%d%%", progress);
+    
+    delay(50); // 載入動畫速度
+  }
+  
+  // 載入完成提示
+  tft.setTextColor(ILI9341_GREEN);
+  tft.setTextSize(1);
+  String completeText = "Loading Complete!";
+  int16_t completeX = (tft.width() - completeText.length() * 6) / 2;
+  tft.setCursor(completeX, 200);
+  tft.print(completeText);
+  
+  delay(500); // 短暫停留顯示完成訊息
+}
+
+// 主要的Pokemon載入和顯示流程 (動態ESP-NOW切換版本)
+bool loadAndDisplayPokemon(int pokemon_id) {
+  Serial.printf("Starting dynamic load process for Pokemon #%d\n", pokemon_id);
+  
+  // 1. 切換到載入狀態
+  if (!changeSystemState(SD_LOADING, "Pokemon requested")) {
+    return false;
+  }
+  
+  // 2. 顯示載入畫面
+  showLoadingScreen(pokemon_id);
+  
+  // 3. 安全關閉ESP-NOW
+  if (!safelyDisableESPNOW()) {
+    Serial.println("Failed to disable ESP-NOW");
+    changeSystemState(ERROR_RECOVERY, "ESP-NOW disable failed");
+    return false;
+  }
+  
+  // 4. 從SD卡載入Pokemon資料 (此時無SPI衝突!)
+  bool loadSuccess = loadPokemonFromSD(pokemon_id);
+  
+  // 5. 重新啟動ESP-NOW
+  if (!safelyEnableESPNOW()) {
+    Serial.println("Failed to re-enable ESP-NOW");
+    changeSystemState(ERROR_RECOVERY, "ESP-NOW re-enable failed");
+    return false;
+  }
+  
+  // 6. 檢查載入結果並顯示
+  if (loadSuccess) {
+    changeSystemState(DISPLAYING, "Data loaded successfully");
+    
+    // 顯示Pokemon資訊和動畫
+    displayDynamicPokemonData();
+    
+    // 顯示5秒後回到監聽狀態
+    delay(5000);
+    changeSystemState(LISTENING, "Display completed");
+    displayPokemonBallWelcome();
+    
+    return true;
+  } else {
+    Serial.printf("Failed to load Pokemon #%d data\n", pokemon_id);
+    changeSystemState(ERROR_RECOVERY, "Data loading failed");
+    return false;
+  }
+}
+
+// 顯示動態載入的Pokemon資料
+void displayDynamicPokemonData() {
+  if (!currentPokemon.loaded) {
+    Serial.println("No Pokemon data loaded");
+    return;
+  }
+  
+  Serial.printf("Displaying dynamic Pokemon: %s\n", currentPokemon.name_en.c_str());
+  
+  // 清除螢幕
+  tft.fillScreen(ILI9341_BLACK);
+  
+  // 顯示Pokemon ID
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  String idText = "#" + String(currentPokemon.id);
+  int16_t idX = (tft.width() - idText.length() * 12) / 2;
+  tft.setCursor(idX, 20);
+  tft.print(idText);
+  
+  // 顯示英文名稱
+  int16_t nameX = (tft.width() - currentPokemon.name_en.length() * 12) / 2;
+  tft.setCursor(nameX, 45);
+  tft.print(currentPokemon.name_en);
+  
+  // 顯示中文名稱
+  tft.setTextSize(1);
+  int16_t nameZhX = (tft.width() - currentPokemon.name_zh.length() * 6) / 2;
+  tft.setCursor(nameZhX, 70);
+  tft.print(currentPokemon.name_zh);
+  
+  // 顯示屬性標籤
+  int badgeY = 250;
+  int badgeWidth = 70;
+  int badgeHeight = 20;
+  
+  if (currentPokemon.type2.length() > 0) {
+    // 雙屬性
+    drawTypeBadge(40, badgeY, badgeWidth, badgeHeight, 
+                  currentPokemon.type1.c_str(), getTypeColor(currentPokemon.type1.c_str()));
+    drawTypeBadge(130, badgeY, badgeWidth, badgeHeight, 
+                  currentPokemon.type2.c_str(), getTypeColor(currentPokemon.type2.c_str()));
+  } else {
+    // 單屬性
+    int singleBadgeX = (tft.width() - badgeWidth) / 2;
+    drawTypeBadge(singleBadgeX, badgeY, badgeWidth, badgeHeight, 
+                  currentPokemon.type1.c_str(), getTypeColor(currentPokemon.type1.c_str()));
+  }
+  
+  // 顯示身高體重
+  tft.setTextSize(1);
+  float height = currentPokemon.height / 10.0;
+  float weight = currentPokemon.weight / 10.0;
+  
+  char heightText[32], weightText[32];
+  snprintf(heightText, sizeof(heightText), "Height: %.1fm", height);
+  snprintf(weightText, sizeof(weightText), "Weight: %.1fkg", weight);
+  
+  tft.setCursor(20, 280);
+  tft.print(heightText);
+  tft.setCursor(20, 300);
+  tft.print(weightText);
+  
+  // 播放GIF動畫 (如果載入成功)
+  if (currentGIF.loaded) {
+    playGIFFromMemory();
+  } else {
+    // 降級到程式化動畫
+    playProgrammaticAnimation(currentPokemon.id);
+  }
+}
+
+// GIF回調函數 - 在TFT上繪製GIF幀
+void GIFDraw(GIFDRAW *pDraw)
+{
+  uint8_t *s;
+  uint16_t *d, *usPalette, usTemp[320];
+  int x, y, iWidth;
+
+  iWidth = pDraw->iWidth;
+  if (iWidth > 240) // TFT寬度限制
+      iWidth = 240;
+
+  usPalette = pDraw->pPalette;
+  y = pDraw->iY + pDraw->y; // current line
+  
+  // 計算GIF在螢幕上的位置 (置中顯示)
+  int gif_x_offset = (tft.width() - pDraw->iWidth) / 2;
+  int gif_y_offset = 90; // 在Pokemon資訊下方
+  
+  s = pDraw->pPixels;
+  if (pDraw->ucDisposalMethod == 2) // restore to background color
+  {
+    for (x=0; x<iWidth; x++)
+    {
+      if (s[x] == pDraw->ucTransparent)
+        s[x] = pDraw->ucBackground;
+    }
+    pDraw->ucHasTransparency = 0;
+  }
+  
+  // Apply the new pixels to the main image
+  if (pDraw->ucHasTransparency) // if transparency used
+  {
+    uint8_t *pEnd, c, ucTransparent = pDraw->ucTransparent;
+    int x, iCount;
+    pEnd = s + iWidth;
+    x = 0;
+    iCount = 0; // count non-transparent pixels
+    while(x < iWidth)
+    {
+      c = ucTransparent-1;
+      d = usTemp;
+      while (c != ucTransparent && s < pEnd)
+      {
+        c = *s++;
+        if (c == ucTransparent) // done, stop
+        {
+          s--; // back up to treat it like transparent
+        }
+        else // opaque
+        {
+          *d++ = usPalette[c];
+          iCount++;
+        }
+      } // while looking for opaque pixels
+      if (iCount) // any opaque pixels?
+      {
+        tft.startWrite();
+        tft.setAddrWindow(gif_x_offset + x, gif_y_offset + y, iCount, 1);
+        tft.writePixels(usTemp, iCount);
+        tft.endWrite();
+        x += iCount;
+        iCount = 0;
+      }
+      // no, look for a run of transparent pixels
+      c = ucTransparent;
+      while (c == ucTransparent && s < pEnd)
+      {
+        c = *s++;
+        if (c == ucTransparent)
+          iCount++;
+        else
+          s--;
+      }
+      if (iCount)
+      {
+        x += iCount; // skip these
+        iCount = 0;
+      }
+    }
+  }
+  else // no transparency
+  {
+    s = pDraw->pPixels;
+    // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
+    for (x=0; x<iWidth; x++)
+      usTemp[x] = usPalette[s[x]];
+    tft.startWrite();
+    tft.setAddrWindow(gif_x_offset, gif_y_offset + y, iWidth, 1);
+    tft.writePixels(usTemp, iWidth);
+    tft.endWrite();
+  }
+} /* GIFDraw() */
+
+// 從記憶體播放GIF動畫
+void playGIFFromMemory() {
+  if (!currentGIF.loaded || !currentGIF.gif_data) {
+    Serial.println("No GIF data available");
+    return;
+  }
+  
+  Serial.printf("Playing GIF from memory: %d bytes\n", currentGIF.gif_size);
+  
+  // 打開記憶體中的GIF
+  if (gif.open(currentGIF.gif_data, currentGIF.gif_size, GIFDraw)) {
+    Serial.printf("GIF opened successfully: %dx%d\n", 
+                  gif.getCanvasWidth(), gif.getCanvasHeight());
+    
+    // 播放3秒的動畫
+    unsigned long startTime = millis();
+    while (millis() - startTime < 3000) {
+      if (!gif.playFrame(true, NULL)) {
+        gif.reset(); // 重新開始播放
+      }
+      delay(50); // 固定延遲，大約20fps
+    }
+    
+    gif.close();
+    Serial.println("GIF playback completed");
+  } else {
+    Serial.println("Failed to open GIF from memory");
+  }
+}
+
+// 程式化動畫作為降級選項
+void playProgrammaticAnimation(int pokemon_id) {
+  Serial.printf("Playing programmatic animation for Pokemon #%d\n", pokemon_id);
+  
+  // 在螢幕中央區域顯示簡單動畫
+  int16_t areaX = 20;
+  int16_t areaY = 90;
+  int16_t areaWidth = 200;
+  int16_t areaHeight = 120;
+  
+  // 使用既有的精靈動畫函數
+  playEnhancedPokemonAnimation(pokemon_id, areaX, areaY, areaWidth, areaHeight, 3000);
+}
+
 // 完整的Pokemon頁面顯示函數 - 包含精靈動畫和增強過渡效果
 bool displayPokemonPage(int id)
 {
   Serial.printf("Displaying Pokemon page for #%d with enhanced transitions\n", id);
-  
-  if (!checkMemoryAvailable("displayPokemonPage")) {
+
+  if (!checkMemoryAvailable("displayPokemonPage"))
+  {
     Serial.println("Insufficient memory for Pokemon page display");
     return false;
   }
 
   // Step 1: Show transition from welcome screen if this is first Pokemon
   static bool isFirstPokemon = true;
-  if (isFirstPokemon) {
+  if (isFirstPokemon)
+  {
     transitionFromWelcomeScreen();
     isFirstPokemon = false;
-  } else {
+  }
+  else
+  {
     // Quick fade for subsequent Pokemon
     fadeToBlack(3);
   }
 
   // Step 2: Show scanning animation
   showPokemonScanAnimation();
-  
+
   // Step 3: Brief pause for suspense
   delay(500);
-  
+
   // Step 4: Reveal Pokemon with slide-in effect
   tft.fillScreen(ILI9341_BLACK);
-  
+
   // Get Pokemon data for enhanced display
-  const PokemonData* pokemon = findPokemonData(id);
-  if (pokemon) {
+  const PokemonData *pokemon = findPokemonData(id);
+  if (pokemon)
+  {
     PokemonData data;
     memcpy_P(&data, pokemon, sizeof(PokemonData));
-    
+
     // Show "Pokemon Found!" message
     tft.setTextColor(ILI9341_GREEN);
     tft.setTextSize(2);
@@ -922,21 +1646,23 @@ bool displayPokemonPage(int id)
     int16_t foundX = (tft.width() - foundText.length() * 12) / 2;
     tft.setCursor(foundX, 20);
     tft.print(foundText);
-    
+
     // Flash effect
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 2; i++)
+    {
       delay(200);
       tft.fillRect(foundX, 20, foundText.length() * 12, 16, ILI9341_BLACK);
       delay(200);
       tft.setCursor(foundX, 20);
       tft.print(foundText);
     }
-    
+
     delay(800);
   }
 
   // Step 5: Display Pokemon info with slide-in animation
-  if (!displayPokemonInfoWithTransition(id)) {
+  if (!displayPokemonInfoWithTransition(id))
+  {
     Serial.println("Failed to display Pokemon info");
     return false;
   }
@@ -952,13 +1678,15 @@ bool displayPokemonPage(int id)
 bool displayPokemonInfoWithTransition(int id)
 {
   Serial.printf("Displaying Pokemon info with transition for ID %d\n", id);
-  
-  if (!acquireDisplay("displayPokemonInfoWithTransition")) {
+
+  if (!acquireDisplay("displayPokemonInfoWithTransition"))
+  {
     return false;
   }
 
-  const PokemonData* pokemon = findPokemonData(id);
-  if (!pokemon) {
+  const PokemonData *pokemon = findPokemonData(id);
+  if (!pokemon)
+  {
     releaseDisplay("displayPokemonInfoWithTransition");
     return false;
   }
@@ -973,15 +1701,17 @@ bool displayPokemonInfoWithTransition(int id)
   int16_t slideDistance = 240;
   int16_t slideSteps = 20;
   int16_t stepSize = slideDistance / slideSteps;
-  
-  for (int step = 0; step < slideSteps; step++) {
+
+  for (int step = 0; step < slideSteps; step++)
+  {
     int16_t currentX = slideDistance - (step * stepSize);
-    
+
     // Clear previous position
-    if (step > 0) {
+    if (step > 0)
+    {
       tft.fillRect(0, 45, 240, 30, ILI9341_BLACK);
     }
-    
+
     // Draw Pokemon ID
     tft.setTextSize(2);
     tft.setTextColor(ILI9341_WHITE);
@@ -989,25 +1719,26 @@ bool displayPokemonInfoWithTransition(int id)
     snprintf(idText, sizeof(idText), "#%d", data.id);
     tft.setCursor(currentX, 50);
     tft.print(idText);
-    
+
     delay(20);
     esp_task_wdt_reset();
   }
-  
+
   // English name with typewriter effect
   tft.setTextSize(2);
   tft.setTextColor(ILI9341_CYAN);
   int16_t nameX = 20;
   int16_t nameY = 80;
-  
-  for (int i = 0; i < strlen(data.name_en); i++) {
+
+  for (int i = 0; i < strlen(data.name_en); i++)
+  {
     tft.setCursor(nameX + i * 12, nameY);
     tft.print(data.name_en[i]);
     delay(60);
   }
-  
+
   delay(200);
-  
+
   // Chinese name
   tft.setTextSize(1);
   tft.setTextColor(ILI9341_YELLOW);
@@ -1017,14 +1748,14 @@ bool displayPokemonInfoWithTransition(int id)
   // Stats with progress bar animation
   tft.setTextSize(1);
   tft.setTextColor(ILI9341_WHITE);
-  
+
   // Height
   tft.setCursor(20, 220);
   tft.print("Height: ");
   tft.print(data.height / 10.0, 1);
   tft.print(" m");
-  
-  // Weight  
+
+  // Weight
   tft.setCursor(20, 235);
   tft.print("Weight: ");
   tft.print(data.weight / 10.0, 1);
@@ -1036,35 +1767,41 @@ bool displayPokemonInfoWithTransition(int id)
   int badgeHeight = 20;
   int badgeSpacing = 10;
 
-  if (data.type2) {
+  if (data.type2)
+  {
     // Two types with staggered animation
     int totalWidth = 2 * badgeWidth + badgeSpacing;
     int startX = (tft.width() - totalWidth) / 2;
-    
+
     // First type
     uint16_t type1Color = getTypeColor(data.type1);
-    for (int w = 0; w <= badgeWidth; w += 5) {
+    for (int w = 0; w <= badgeWidth; w += 5)
+    {
       tft.fillRect(startX + badgeWidth - w, badgeY, w, badgeHeight, type1Color);
       delay(20);
     }
     drawTypeBadge(startX, badgeY, badgeWidth, badgeHeight, data.type1, type1Color);
-    
+
     delay(200);
-    
+
     // Second type
     uint16_t type2Color = getTypeColor(data.type2);
     int type2X = startX + badgeWidth + badgeSpacing;
-    for (int w = 0; w <= badgeWidth; w += 5) {
+    for (int w = 0; w <= badgeWidth; w += 5)
+    {
       tft.fillRect(type2X, badgeY, w, badgeHeight, type2Color);
       delay(20);
     }
     drawTypeBadge(type2X, badgeY, badgeWidth, badgeHeight, data.type2, type2Color);
-  } else {
+  }
+  else
+  {
     // Single type
     int startX = (tft.width() - badgeWidth) / 2;
     uint16_t typeColor = getTypeColor(data.type1);
-    
-    for (int w = 0; w <= badgeWidth; w += 5) {
+
+    for (int w = 0; w <= badgeWidth; w += 5)
+    {
       tft.fillRect(startX + badgeWidth - w, badgeY, w, badgeHeight, typeColor);
       delay(20);
     }
@@ -1072,7 +1809,7 @@ bool displayPokemonInfoWithTransition(int id)
   }
 
   releaseDisplay("displayPokemonInfoWithTransition");
-  
+
   Serial.println("Pokemon info displayed with enhanced transitions");
   return true;
 }
@@ -1144,15 +1881,15 @@ void setup()
 {
   delay(500); // 小延遲讓電源穩定
   Serial.begin(115200);
-  
+
   Serial.println("=== 寶可夢圖鑑啟動 ===");
-  
+
   // 初始化簡單的資源管理標誌
   displayBusy = false;
   pokemonDisplayRequested = false;
-  
+
   Serial.println("Resource management initialized (SD-free)");
-  
+
   // 初始化看門狗
   esp_task_wdt_init(WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
@@ -1195,10 +1932,10 @@ void setup()
 
   // 無需SD卡初始化！使用嵌入式資料
   Serial.println("Using embedded Pokemon data - no SD card needed!");
-  
+
   // 恢復背光
   digitalWrite(TFT_LED, HIGH);
-  
+
   // 只設置TFT CS腳位，無需SD卡腳位
   pinMode(TFT_CS, OUTPUT);
   digitalWrite(TFT_CS, HIGH);
@@ -1224,13 +1961,13 @@ void setup()
     tft.fillRect(0, 260, 240, 60, ILI9341_BLACK);
     tft.setTextColor(ILI9341_GREEN);
     tft.setTextSize(1);
-    
+
     // Center the text
     String readyText = "ESP-NOW Ready!";
     int16_t readyX = (tft.width() - readyText.length() * 6) / 2;
     tft.setCursor(readyX, 270);
     tft.print(readyText);
-    
+
     String scanText = "Scan NFC Pokemon Card";
     int16_t scanX = (tft.width() - scanText.length() * 6) / 2;
     tft.setCursor(scanX, 290);
@@ -1242,12 +1979,12 @@ void setup()
     tft.fillRect(0, 260, 240, 60, ILI9341_BLACK);
     tft.setTextColor(ILI9341_RED);
     tft.setTextSize(1);
-    
+
     String errorText = "ESP-NOW Init Failed";
     int16_t errorX = (tft.width() - errorText.length() * 6) / 2;
     tft.setCursor(errorX, 270);
     tft.print(errorText);
-    
+
     String checkText = "Check Connections";
     int16_t checkX = (tft.width() - checkText.length() * 6) / 2;
     tft.setCursor(checkX, 290);
@@ -1260,77 +1997,50 @@ void loop()
   // 餵看門狗和系統健康檢查
   esp_task_wdt_reset();
   updateSystemHealth();
-  
+
   // 如果系統不健康，跳過主要處理
-  if (!systemHealthy) {
+  if (!systemHealthy)
+  {
     delay(1000);
     return;
   }
-  
-  // 安全處理Pokemon顯示請求
-  if (pokemonDisplayRequested && !displayBusy) {
+
+  // 安全處理Pokemon顯示請求 - 新版動態載入系統
+  if (currentState == LISTENING && pokemonDisplayRequested && !displayBusy)
+  {
     pokemonDisplayRequested = false; // 重置標誌
-    newDataReceived = false; // 也重置這個標誌
+    newDataReceived = false;         // 也重置這個標誌
 
     int pokemonId = requestedPokemonId;
-    Serial.printf("Processing Pokemon display request for ID: %d\n", pokemonId);
-    
+    Serial.printf("Processing Pokemon display request for ID: %d (Dynamic Loading)\n", pokemonId);
+
     // 檢查記憶體狀態
-    if (!checkMemoryAvailable("main_loop_display")) {
-      Serial.println("Insufficient memory for display, skipping request");
-      
-      // 顯示錯誤訊息
-      if (acquireDisplay("error_display")) {
-        tft.fillRect(0, 280, 240, 40, ILI9341_BLACK);
-        tft.setTextColor(ILI9341_RED);
-        tft.setTextSize(1);
-        tft.setCursor(10, 285);
-        tft.println("Memory error!");
-        tft.setCursor(10, 300);
-        tft.println("Please restart device");
-        
-        releaseDisplay("error_display");
-      }
-      
+    if (!checkMemoryAvailable("dynamic_load"))
+    {
+      Serial.println("Insufficient memory for dynamic loading");
+      changeSystemState(ERROR_RECOVERY, "Insufficient memory");
       return;
     }
 
-    // 嘗試顯示Pokemon頁面
-    if (!displayPokemonPage(pokemonId)) {
-      Serial.println("Failed to display Pokemon page, showing error");
-      
-      // 顯示失敗訊息
-      if (acquireDisplay("fail_display")) {
-        tft.fillRect(0, 280, 240, 40, ILI9341_BLACK);
-        tft.setTextColor(ILI9341_ORANGE);
-        tft.setTextSize(1);
-        tft.setCursor(10, 285);
-        tft.printf("Pokemon #%d not found", pokemonId);
-        tft.setCursor(10, 300);
-        tft.println("Check embedded data");
-        
-        releaseDisplay("fail_display");
-      }
-    } else {
-      // 成功顯示後，短暫顯示狀態訊息
-      safeDelayWithMemCheck(2000, "success_display");
-      
-      if (acquireDisplay("status_update")) {
-        tft.fillRect(0, 280, 240, 40, ILI9341_BLACK);
-        tft.setTextColor(ILI9341_GREEN);
-        tft.setTextSize(1);
-        tft.setCursor(10, 285);
-        tft.println("Ready for next scan");
-        tft.setCursor(10, 300);
-        tft.printf("Last shown: #%d", pokemonId);
-        
-        releaseDisplay("status_update");
-      }
+    // 使用新的動態載入系統
+    if (!loadAndDisplayPokemon(pokemonId)) {
+      Serial.printf("Failed to load Pokemon #%d dynamically\n", pokemonId);
+      changeSystemState(ERROR_RECOVERY, "Dynamic loading failed");
+      return;
     }
   }
   
+  // 處理錯誤恢復狀態
+  else if (currentState == ERROR_RECOVERY) {
+    performSystemRecovery();
+    changeSystemState(LISTENING, "Recovery completed");
+    displayPokemonBallWelcome();
+    return;
+  }
+
   // 處理舊版本的newDataReceived標誌（fallback）
-  else if (newDataReceived && !pokemonDisplayRequested) {
+  else if (newDataReceived && !pokemonDisplayRequested)
+  {
     newDataReceived = false;
     Serial.println("Received data without display request flag - possible race condition");
   }
@@ -1378,7 +2088,7 @@ void runDiagnostics()
   Serial.println("SD card diagnostics skipped (using embedded data)");
   Serial.println("System is using embedded Pokemon database");
   Serial.println("--- SIMPLIFIED DIAG END ---");
-  
+
   // halt here to avoid repeating
   while (1)
     delay(1000);
