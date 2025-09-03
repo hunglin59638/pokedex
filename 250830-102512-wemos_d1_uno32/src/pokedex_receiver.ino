@@ -32,7 +32,7 @@
 #define TFT_LED 2 // 背光控制
 
 // 定義SD卡引腳 (重新啟用)
-#define SD_CS 14  // SD卡片選引腳
+#define SD_CS 14 // SD卡片選引腳
 
 // 嵌入式Pokemon資料結構
 struct PokemonData
@@ -83,7 +83,8 @@ const PokemonSprite PROGMEM pokemon_sprites[] = {
 const int POKEMON_SPRITES_SIZE = sizeof(pokemon_sprites) / sizeof(PokemonSprite);
 
 // 動態Pokemon資料結構 (從SD卡載入)
-struct DynamicPokemonData {
+struct DynamicPokemonData
+{
   int id;
   String name_en;
   String name_zh;
@@ -95,37 +96,45 @@ struct DynamicPokemonData {
 };
 
 // GIF記憶體緩衝系統 (單一Pokemon的暫存)
-struct GIFBuffer {
+struct GIFBuffer
+{
   int pokemon_id;
-  uint8_t* gif_data;
+  uint8_t *gif_data;
   size_t gif_size;
   size_t capacity;
   bool loaded;
-  
+
   GIFBuffer() : pokemon_id(-1), gif_data(nullptr), gif_size(0), capacity(0), loaded(false) {}
-  
-  ~GIFBuffer() {
-    if (gif_data) {
+
+  ~GIFBuffer()
+  {
+    if (gif_data)
+    {
       free(gif_data);
       gif_data = nullptr;
     }
   }
-  
-  bool allocate(size_t size) {
-    if (gif_data) {
+
+  bool allocate(size_t size)
+  {
+    if (gif_data)
+    {
       free(gif_data);
     }
-    gif_data = (uint8_t*)malloc(size);
-    if (gif_data) {
+    gif_data = (uint8_t *)malloc(size);
+    if (gif_data)
+    {
       capacity = size;
       return true;
     }
     capacity = 0;
     return false;
   }
-  
-  void clear() {
-    if (gif_data) {
+
+  void clear()
+  {
+    if (gif_data)
+    {
       free(gif_data);
       gif_data = nullptr;
     }
@@ -140,6 +149,12 @@ struct GIFBuffer {
 DynamicPokemonData currentPokemon;
 GIFBuffer currentGIF;
 AnimatedGIF gif;
+
+// GIF canvas dimensions for proper frame clearing (fixes 殘影 issue)
+int16_t g_xOffset = 0;
+int16_t g_yOffset = 0;
+int16_t g_canvasWidth = 0;
+int16_t g_canvasHeight = 0;
 
 // 查找Pokemon資料的函數
 const PokemonData *findPokemonData(int id)
@@ -177,11 +192,12 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 #define WIFI_CHANNEL 1 // 與發送端保持一致
 
 // 系統狀態機定義
-enum SystemState {
-  LISTENING,      // ESP-NOW開啟，等待接收Pokemon ID
-  SD_LOADING,     // ESP-NOW關閉，正在從SD卡載入資料
-  DISPLAYING,     // 正在顯示Pokemon資訊和動畫
-  ERROR_RECOVERY  // 錯誤恢復狀態
+enum SystemState
+{
+  LISTENING,     // ESP-NOW開啟，等待接收Pokemon ID
+  SD_LOADING,    // ESP-NOW關閉，正在從SD卡載入資料
+  DISPLAYING,    // 正在顯示Pokemon資訊和動畫
+  ERROR_RECOVERY // 錯誤恢復狀態
 };
 
 volatile SystemState currentState = LISTENING;
@@ -216,58 +232,68 @@ volatile int consecutiveErrors = 0;
 #define MAX_CONSECUTIVE_ERRORS 3
 
 // 狀態轉換和安全檢查函數
-bool changeSystemState(SystemState newState, const char* reason = "") {
-  if (newState == currentState) {
+bool changeSystemState(SystemState newState, const char *reason = "")
+{
+  if (newState == currentState)
+  {
     return true; // 已經在目標狀態
   }
-  
+
   Serial.printf("State transition: %d -> %d (%s)\n", currentState, newState, reason);
-  
+
   // 檢查狀態轉換的有效性
-  switch (currentState) {
-    case LISTENING:
-      if (newState != SD_LOADING && newState != ERROR_RECOVERY) {
-        Serial.println("Invalid state transition from LISTENING");
-        return false;
-      }
-      break;
-    case SD_LOADING:
-      if (newState != DISPLAYING && newState != ERROR_RECOVERY && newState != LISTENING) {
-        Serial.println("Invalid state transition from SD_LOADING");
-        return false;
-      }
-      break;
-    case DISPLAYING:
-      if (newState != LISTENING && newState != ERROR_RECOVERY) {
-        Serial.println("Invalid state transition from DISPLAYING");
-        return false;
-      }
-      break;
-    case ERROR_RECOVERY:
-      if (newState != LISTENING) {
-        Serial.println("Invalid state transition from ERROR_RECOVERY");
-        return false;
-      }
-      break;
+  switch (currentState)
+  {
+  case LISTENING:
+    if (newState != SD_LOADING && newState != ERROR_RECOVERY)
+    {
+      Serial.println("Invalid state transition from LISTENING");
+      return false;
+    }
+    break;
+  case SD_LOADING:
+    if (newState != DISPLAYING && newState != ERROR_RECOVERY && newState != LISTENING)
+    {
+      Serial.println("Invalid state transition from SD_LOADING");
+      return false;
+    }
+    break;
+  case DISPLAYING:
+    if (newState != LISTENING && newState != ERROR_RECOVERY)
+    {
+      Serial.println("Invalid state transition from DISPLAYING");
+      return false;
+    }
+    break;
+  case ERROR_RECOVERY:
+    if (newState != LISTENING)
+    {
+      Serial.println("Invalid state transition from ERROR_RECOVERY");
+      return false;
+    }
+    break;
   }
-  
+
   currentState = newState;
   stateChangeTime = millis();
   return true;
 }
 
 // 檢查狀態超時
-void checkStateTimeout() {
+void checkStateTimeout()
+{
   unsigned long timeInState = millis() - stateChangeTime;
-  
+
   // SD_LOADING狀態不應該超過10秒
-  if (currentState == SD_LOADING && timeInState > 10000) {
+  if (currentState == SD_LOADING && timeInState > 10000)
+  {
     Serial.println("SD_LOADING timeout - forcing recovery");
     changeSystemState(ERROR_RECOVERY, "SD loading timeout");
   }
-  
+
   // ERROR_RECOVERY狀態不應該超過5秒
-  if (currentState == ERROR_RECOVERY && timeInState > 5000) {
+  if (currentState == ERROR_RECOVERY && timeInState > 5000)
+  {
     Serial.println("ERROR_RECOVERY timeout - returning to LISTENING");
     changeSystemState(LISTENING, "Recovery timeout");
   }
@@ -360,192 +386,220 @@ void performSystemRecovery()
 }
 
 // ESP-NOW安全控制函數
-bool safelyDisableESPNOW() {
+bool safelyDisableESPNOW()
+{
   Serial.println("Safely disabling ESP-NOW for SD access...");
-  
-  try {
+
+  try
+  {
     // 停止ESP-NOW接收
     esp_now_deinit();
-    
+
     // 關閉WiFi模式
     WiFi.mode(WIFI_OFF);
-    
+
     // 等待確保完全關閉
     delay(100);
-    
+
     Serial.println("ESP-NOW disabled successfully");
     return true;
-  } catch (...) {
+  }
+  catch (...)
+  {
     Serial.println("Error disabling ESP-NOW");
     return false;
   }
 }
 
-bool safelyEnableESPNOW() {
+bool safelyEnableESPNOW()
+{
   Serial.println("Re-enabling ESP-NOW...");
-  
-  try {
+
+  try
+  {
     // 重新啟動WiFi
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
-    
+
     // 等待WiFi穩定
     delay(100);
-    
+
     // 重新初始化ESP-NOW
-    if (esp_now_init() != ESP_OK) {
+    if (esp_now_init() != ESP_OK)
+    {
       Serial.println("Error re-initializing ESP-NOW");
       return false;
     }
-    
+
     // 重新註冊回調函數
     esp_now_register_recv_cb(OnDataRecv);
-    
+
     Serial.println("ESP-NOW re-enabled successfully");
     return true;
-  } catch (...) {
+  }
+  catch (...)
+  {
     Serial.println("Error re-enabling ESP-NOW");
     return false;
   }
 }
 
 // SD卡安全載入函數 (ESP-NOW已關閉狀態)
-bool loadPokemonFromSD(int pokemon_id) {
+bool loadPokemonFromSD(int pokemon_id)
+{
   Serial.printf("Loading Pokemon #%d from SD card (ESP-NOW disabled)\n", pokemon_id);
-  
+
   // 確保TFT_CS為高電平，避免SPI衝突
   digitalWrite(TFT_CS, HIGH);
   delay(10);
-  
+
   // 初始化SD卡
-  if (!SD.begin(SD_CS)) {
+  if (!SD.begin(SD_CS))
+  {
     Serial.println("SD card initialization failed");
     return false;
   }
-  
+
   // 載入JSON資料
-  if (!loadPokemonJSON(pokemon_id)) {
+  if (!loadPokemonJSON(pokemon_id))
+  {
     SD.end();
     return false;
   }
-  
+
   // 載入GIF資料
-  if (!loadPokemonGIF(pokemon_id)) {
+  if (!loadPokemonGIF(pokemon_id))
+  {
     SD.end();
     return false;
   }
-  
+
   // 安全關閉SD卡
   SD.end();
   digitalWrite(TFT_CS, LOW); // 恢復TFT控制
-  
+
   Serial.printf("Pokemon #%d loaded successfully from SD\n", pokemon_id);
   return true;
 }
 
 // 載入Pokemon JSON資料
-bool loadPokemonJSON(int pokemon_id) {
+bool loadPokemonJSON(int pokemon_id)
+{
   String jsonPath = "/pokemon/" + String(pokemon_id) + ".json";
-  
+
   File jsonFile = SD.open(jsonPath);
-  if (!jsonFile) {
+  if (!jsonFile)
+  {
     Serial.printf("Failed to open JSON file: %s\n", jsonPath.c_str());
     return false;
   }
-  
+
   // 讀取JSON內容
   String jsonContent = "";
-  while (jsonFile.available()) {
+  while (jsonFile.available())
+  {
     jsonContent += (char)jsonFile.read();
   }
   jsonFile.close();
-  
+
   // 解析JSON
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, jsonContent);
-  
-  if (error) {
+
+  if (error)
+  {
     Serial.printf("JSON parsing failed: %s\n", error.c_str());
     return false;
   }
-  
+
   // 提取Pokemon資料
   currentPokemon.id = pokemon_id;
   currentPokemon.name_en = doc["name"]["english"].as<String>();
   currentPokemon.name_zh = doc["name"]["chinese"].as<String>();
-  
+
   JsonArray types = doc["type"];
-  if (types.size() > 0) {
+  if (types.size() > 0)
+  {
     currentPokemon.type1 = types[0].as<String>();
   }
-  if (types.size() > 1) {
+  if (types.size() > 1)
+  {
     currentPokemon.type2 = types[1].as<String>();
-  } else {
+  }
+  else
+  {
     currentPokemon.type2 = "";
   }
-  
+
   currentPokemon.height = doc["base"]["Height"].as<int>();
   currentPokemon.weight = doc["base"]["Weight"].as<int>();
   currentPokemon.loaded = true;
-  
-  Serial.printf("Loaded Pokemon JSON: %s (%s)\n", 
-                currentPokemon.name_en.c_str(), 
+
+  Serial.printf("Loaded Pokemon JSON: %s (%s)\n",
+                currentPokemon.name_en.c_str(),
                 currentPokemon.name_zh.c_str());
-  
+
   return true;
 }
 
 // 載入Pokemon GIF資料到記憶體緩衝區
-bool loadPokemonGIF(int pokemon_id) {
+bool loadPokemonGIF(int pokemon_id)
+{
   String gifPath = "/pokemon/" + String(pokemon_id) + ".gif";
-  
+
   File gifFile = SD.open(gifPath);
-  if (!gifFile) {
+  if (!gifFile)
+  {
     Serial.printf("Failed to open GIF file: %s\n", gifPath.c_str());
     return false;
   }
-  
+
   size_t gifSize = gifFile.size();
   Serial.printf("GIF file size: %d bytes\n", gifSize);
-  
+
   // 檢查記憶體是否足夠
   size_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < gifSize + 50000) { // 保留50KB緩衝
+  if (freeHeap < gifSize + 50000)
+  { // 保留50KB緩衝
     Serial.printf("Insufficient memory for GIF (need %d, have %d)\n", gifSize, freeHeap);
     gifFile.close();
     return false;
   }
-  
+
   // 分配記憶體緩衝區
-  if (!currentGIF.allocate(gifSize)) {
+  if (!currentGIF.allocate(gifSize))
+  {
     Serial.println("Failed to allocate GIF buffer");
     gifFile.close();
     return false;
   }
-  
+
   // 讀取GIF資料到記憶體
   size_t bytesRead = 0;
-  while (gifFile.available() && bytesRead < gifSize) {
+  while (gifFile.available() && bytesRead < gifSize)
+  {
     int bytesToRead = min(1024, (int)(gifSize - bytesRead));
     int actualRead = gifFile.read(currentGIF.gif_data + bytesRead, bytesToRead);
-    if (actualRead <= 0) {
+    if (actualRead <= 0)
+    {
       break;
     }
     bytesRead += actualRead;
   }
-  
+
   gifFile.close();
-  
-  if (bytesRead != gifSize) {
+
+  if (bytesRead != gifSize)
+  {
     Serial.printf("GIF read error: expected %d bytes, got %d\n", gifSize, bytesRead);
     currentGIF.clear();
     return false;
   }
-  
+
   currentGIF.pokemon_id = pokemon_id;
   currentGIF.gif_size = gifSize;
   currentGIF.loaded = true;
-  
+
   Serial.printf("Loaded GIF to memory: %d bytes\n", gifSize);
   return true;
 }
@@ -581,13 +635,15 @@ void safeDelayWithMemCheck(unsigned long ms, const char *context = "delay")
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
   // 只在LISTENING狀態才處理新請求
-  if (currentState != LISTENING) {
+  if (currentState != LISTENING)
+  {
     // 系統正忙，忽略請求 (不在中斷中印出訊息)
     return;
   }
-  
+
   // 檢查資料長度和系統狀態
-  if (len == sizeof(struct_message) && !displayBusy) {
+  if (len == sizeof(struct_message) && !displayBusy)
+  {
     memcpy(&receivedData, incomingData, sizeof(receivedData));
     requestedPokemonId = receivedData.pokemon_id;
     pokemonDisplayRequested = true;
@@ -1285,12 +1341,13 @@ void showPokemonScanAnimation()
 }
 
 // 載入畫面顯示函數
-void showLoadingScreen(int pokemon_id) {
+void showLoadingScreen(int pokemon_id)
+{
   Serial.printf("Showing loading screen for Pokemon #%d\n", pokemon_id);
-  
+
   // 清除螢幕
   tft.fillScreen(ILI9341_BLACK);
-  
+
   // 顯示Pokemon ID
   tft.setTextColor(ILI9341_CYAN);
   tft.setTextSize(3);
@@ -1298,7 +1355,7 @@ void showLoadingScreen(int pokemon_id) {
   int16_t idX = (tft.width() - idText.length() * 18) / 2;
   tft.setCursor(idX, 60);
   tft.print(idText);
-  
+
   // 顯示載入文字
   tft.setTextColor(ILI9341_YELLOW);
   tft.setTextSize(2);
@@ -1306,30 +1363,31 @@ void showLoadingScreen(int pokemon_id) {
   int16_t loadingX = (tft.width() - loadingText.length() * 12) / 2;
   tft.setCursor(loadingX, 120);
   tft.print(loadingText);
-  
+
   // 載入進度條動畫
   int16_t barWidth = 200;
   int16_t barHeight = 10;
   int16_t barX = (tft.width() - barWidth) / 2;
   int16_t barY = 160;
-  
+
   // 進度條外框
   tft.drawRect(barX - 2, barY - 2, barWidth + 4, barHeight + 4, ILI9341_WHITE);
-  
+
   // 動畫載入條
-  for (int progress = 0; progress <= 100; progress += 10) {
+  for (int progress = 0; progress <= 100; progress += 10)
+  {
     int16_t fillWidth = (barWidth * progress) / 100;
     tft.fillRect(barX, barY, fillWidth, barHeight, ILI9341_GREEN);
-    
+
     // 顯示百分比
     tft.fillRect(barX, barY + 20, 60, 16, ILI9341_BLACK);
     tft.setTextSize(1);
     tft.setCursor(barX, barY + 20);
     tft.printf("%d%%", progress);
-    
+
     delay(50); // 載入動畫速度
   }
-  
+
   // 載入完成提示
   tft.setTextColor(ILI9341_GREEN);
   tft.setTextSize(1);
@@ -1337,53 +1395,60 @@ void showLoadingScreen(int pokemon_id) {
   int16_t completeX = (tft.width() - completeText.length() * 6) / 2;
   tft.setCursor(completeX, 200);
   tft.print(completeText);
-  
+
   delay(500); // 短暫停留顯示完成訊息
 }
 
 // 主要的Pokemon載入和顯示流程 (動態ESP-NOW切換版本)
-bool loadAndDisplayPokemon(int pokemon_id) {
+bool loadAndDisplayPokemon(int pokemon_id)
+{
   Serial.printf("Starting dynamic load process for Pokemon #%d\n", pokemon_id);
-  
+
   // 1. 切換到載入狀態
-  if (!changeSystemState(SD_LOADING, "Pokemon requested")) {
+  if (!changeSystemState(SD_LOADING, "Pokemon requested"))
+  {
     return false;
   }
-  
+
   // 2. 顯示載入畫面
   showLoadingScreen(pokemon_id);
-  
+
   // 3. 安全關閉ESP-NOW
-  if (!safelyDisableESPNOW()) {
+  if (!safelyDisableESPNOW())
+  {
     Serial.println("Failed to disable ESP-NOW");
     changeSystemState(ERROR_RECOVERY, "ESP-NOW disable failed");
     return false;
   }
-  
+
   // 4. 從SD卡載入Pokemon資料 (此時無SPI衝突!)
   bool loadSuccess = loadPokemonFromSD(pokemon_id);
-  
+
   // 5. 重新啟動ESP-NOW
-  if (!safelyEnableESPNOW()) {
+  if (!safelyEnableESPNOW())
+  {
     Serial.println("Failed to re-enable ESP-NOW");
     changeSystemState(ERROR_RECOVERY, "ESP-NOW re-enable failed");
     return false;
   }
-  
+
   // 6. 檢查載入結果並顯示
-  if (loadSuccess) {
+  if (loadSuccess)
+  {
     changeSystemState(DISPLAYING, "Data loaded successfully");
-    
+
     // 顯示Pokemon資訊和動畫
     displayDynamicPokemonData();
-    
+
     // 顯示5秒後回到監聽狀態
     delay(5000);
     changeSystemState(LISTENING, "Display completed");
     displayPokemonBallWelcome();
-    
+
     return true;
-  } else {
+  }
+  else
+  {
     Serial.printf("Failed to load Pokemon #%d data\n", pokemon_id);
     changeSystemState(ERROR_RECOVERY, "Data loading failed");
     return false;
@@ -1391,17 +1456,19 @@ bool loadAndDisplayPokemon(int pokemon_id) {
 }
 
 // 顯示動態載入的Pokemon資料
-void displayDynamicPokemonData() {
-  if (!currentPokemon.loaded) {
+void displayDynamicPokemonData()
+{
+  if (!currentPokemon.loaded)
+  {
     Serial.println("No Pokemon data loaded");
     return;
   }
-  
+
   Serial.printf("Displaying dynamic Pokemon: %s\n", currentPokemon.name_en.c_str());
-  
+
   // 清除螢幕
   tft.fillScreen(ILI9341_BLACK);
-  
+
   // 顯示Pokemon ID
   tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(2);
@@ -1409,54 +1476,60 @@ void displayDynamicPokemonData() {
   int16_t idX = (tft.width() - idText.length() * 12) / 2;
   tft.setCursor(idX, 20);
   tft.print(idText);
-  
+
   // 顯示英文名稱
   int16_t nameX = (tft.width() - currentPokemon.name_en.length() * 12) / 2;
   tft.setCursor(nameX, 45);
   tft.print(currentPokemon.name_en);
-  
+
   // 顯示中文名稱
   tft.setTextSize(1);
   int16_t nameZhX = (tft.width() - currentPokemon.name_zh.length() * 6) / 2;
   tft.setCursor(nameZhX, 70);
   tft.print(currentPokemon.name_zh);
-  
+
   // 顯示屬性標籤
   int badgeY = 250;
   int badgeWidth = 70;
   int badgeHeight = 20;
-  
-  if (currentPokemon.type2.length() > 0) {
+
+  if (currentPokemon.type2.length() > 0)
+  {
     // 雙屬性
-    drawTypeBadge(40, badgeY, badgeWidth, badgeHeight, 
+    drawTypeBadge(40, badgeY, badgeWidth, badgeHeight,
                   currentPokemon.type1.c_str(), getTypeColor(currentPokemon.type1.c_str()));
-    drawTypeBadge(130, badgeY, badgeWidth, badgeHeight, 
+    drawTypeBadge(130, badgeY, badgeWidth, badgeHeight,
                   currentPokemon.type2.c_str(), getTypeColor(currentPokemon.type2.c_str()));
-  } else {
+  }
+  else
+  {
     // 單屬性
     int singleBadgeX = (tft.width() - badgeWidth) / 2;
-    drawTypeBadge(singleBadgeX, badgeY, badgeWidth, badgeHeight, 
+    drawTypeBadge(singleBadgeX, badgeY, badgeWidth, badgeHeight,
                   currentPokemon.type1.c_str(), getTypeColor(currentPokemon.type1.c_str()));
   }
-  
+
   // 顯示身高體重
   tft.setTextSize(1);
   float height = currentPokemon.height / 10.0;
   float weight = currentPokemon.weight / 10.0;
-  
+
   char heightText[32], weightText[32];
   snprintf(heightText, sizeof(heightText), "Height: %.1fm", height);
   snprintf(weightText, sizeof(weightText), "Weight: %.1fkg", weight);
-  
+
   tft.setCursor(20, 280);
   tft.print(heightText);
   tft.setCursor(20, 300);
   tft.print(weightText);
-  
+
   // 播放GIF動畫 (如果載入成功)
-  if (currentGIF.loaded) {
+  if (currentGIF.loaded)
+  {
     playGIFFromMemory();
-  } else {
+  }
+  else
+  {
     // 降級到程式化動畫
     playProgrammaticAnimation(currentPokemon.id);
   }
@@ -1465,136 +1538,118 @@ void displayDynamicPokemonData() {
 // GIF回調函數 - 在TFT上繪製GIF幀
 void GIFDraw(GIFDRAW *pDraw)
 {
+  if (!pDraw)
+    return;
+
+  // Clear only the GIF canvas area before drawing the first line of each frame
+  // This fixes the 殘影 (ghosting) issue caused by different transparency regions between frames
+  if (pDraw->y == 0)
+  {
+    tft.fillRect(g_xOffset, g_yOffset, g_canvasWidth, g_canvasHeight, ILI9341_BLACK);
+  }
+
   uint8_t *s;
   uint16_t *d, *usPalette, usTemp[320];
   int x, y, iWidth;
 
   iWidth = pDraw->iWidth;
   if (iWidth > 240) // TFT寬度限制
-      iWidth = 240;
+    iWidth = 240;
 
   usPalette = pDraw->pPalette;
   y = pDraw->iY + pDraw->y; // current line
-  
-  // 計算GIF在螢幕上的位置 (置中顯示)
-  int gif_x_offset = (tft.width() - pDraw->iWidth) / 2;
-  int gif_y_offset = 90; // 在Pokemon資訊下方
-  
+
+  // Use global offsets for consistent positioning with canvas clearing
+  int gif_x_offset = g_xOffset;
+  int gif_y_offset = g_yOffset;
+
   s = pDraw->pPixels;
-  if (pDraw->ucDisposalMethod == 2) // restore to background color
+  
+  // Convert and handle transparency properly - replace transparent pixels with black
+  for (x = 0; x < iWidth; x++)
   {
-    for (x=0; x<iWidth; x++)
+    uint8_t idx = s[x];
+    uint16_t color;
+
+    if (pDraw->ucHasTransparency && idx == pDraw->ucTransparent)
     {
-      if (s[x] == pDraw->ucTransparent)
-        s[x] = pDraw->ucBackground;
+      color = ILI9341_BLACK; // Replace transparent with black (fixes green background issue)
     }
-    pDraw->ucHasTransparency = 0;
+    else
+    {
+      color = usPalette[idx];
+    }
+    
+    usTemp[x] = color;
   }
   
-  // Apply the new pixels to the main image
-  if (pDraw->ucHasTransparency) // if transparency used
-  {
-    uint8_t *pEnd, c, ucTransparent = pDraw->ucTransparent;
-    int x, iCount;
-    pEnd = s + iWidth;
-    x = 0;
-    iCount = 0; // count non-transparent pixels
-    while(x < iWidth)
-    {
-      c = ucTransparent-1;
-      d = usTemp;
-      while (c != ucTransparent && s < pEnd)
-      {
-        c = *s++;
-        if (c == ucTransparent) // done, stop
-        {
-          s--; // back up to treat it like transparent
-        }
-        else // opaque
-        {
-          *d++ = usPalette[c];
-          iCount++;
-        }
-      } // while looking for opaque pixels
-      if (iCount) // any opaque pixels?
-      {
-        tft.startWrite();
-        tft.setAddrWindow(gif_x_offset + x, gif_y_offset + y, iCount, 1);
-        tft.writePixels(usTemp, iCount);
-        tft.endWrite();
-        x += iCount;
-        iCount = 0;
-      }
-      // no, look for a run of transparent pixels
-      c = ucTransparent;
-      while (c == ucTransparent && s < pEnd)
-      {
-        c = *s++;
-        if (c == ucTransparent)
-          iCount++;
-        else
-          s--;
-      }
-      if (iCount)
-      {
-        x += iCount; // skip these
-        iCount = 0;
-      }
-    }
-  }
-  else // no transparency
-  {
-    s = pDraw->pPixels;
-    // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
-    for (x=0; x<iWidth; x++)
-      usTemp[x] = usPalette[s[x]];
-    tft.startWrite();
-    tft.setAddrWindow(gif_x_offset, gif_y_offset + y, iWidth, 1);
-    tft.writePixels(usTemp, iWidth);
-    tft.endWrite();
-  }
+  // Draw the converted line to TFT
+  tft.startWrite();
+  tft.setAddrWindow(gif_x_offset, gif_y_offset + y, iWidth, 1);
+  tft.writePixels(usTemp, iWidth);
+  tft.endWrite();
 } /* GIFDraw() */
 
 // 從記憶體播放GIF動畫
-void playGIFFromMemory() {
-  if (!currentGIF.loaded || !currentGIF.gif_data) {
+void playGIFFromMemory()
+{
+  if (!currentGIF.loaded || !currentGIF.gif_data)
+  {
     Serial.println("No GIF data available");
     return;
   }
-  
+
   Serial.printf("Playing GIF from memory: %d bytes\n", currentGIF.gif_size);
-  
+
   // 打開記憶體中的GIF
-  if (gif.open(currentGIF.gif_data, currentGIF.gif_size, GIFDraw)) {
-    Serial.printf("GIF opened successfully: %dx%d\n", 
-                  gif.getCanvasWidth(), gif.getCanvasHeight());
+  if (gif.open(currentGIF.gif_data, currentGIF.gif_size, GIFDraw))
+  {
+    // Get GIF dimensions and calculate canvas area for frame clearing
+    int16_t origWidth = gif.getCanvasWidth();
+    int16_t origHeight = gif.getCanvasHeight();
     
+    Serial.printf("GIF opened successfully: %dx%d\n", origWidth, origHeight);
+    
+    // Calculate canvas position and dimensions (same logic as current GIFDraw positioning)
+    g_canvasWidth = origWidth;
+    g_canvasHeight = origHeight;
+    g_xOffset = (tft.width() - origWidth) / 2;
+    g_yOffset = 90; // 在Pokemon資訊下方 (matches current gif_y_offset)
+    
+    Serial.printf("GIF canvas area: %dx%d at offset (%d,%d)\n", 
+                  g_canvasWidth, g_canvasHeight, g_xOffset, g_yOffset);
+
     // 播放3秒的動畫
     unsigned long startTime = millis();
-    while (millis() - startTime < 3000) {
-      if (!gif.playFrame(true, NULL)) {
+    while (millis() - startTime < 3000)
+    {
+      if (!gif.playFrame(true, NULL))
+      {
         gif.reset(); // 重新開始播放
       }
       delay(50); // 固定延遲，大約20fps
     }
-    
+
     gif.close();
     Serial.println("GIF playback completed");
-  } else {
+  }
+  else
+  {
     Serial.println("Failed to open GIF from memory");
   }
 }
 
 // 程式化動畫作為降級選項
-void playProgrammaticAnimation(int pokemon_id) {
+void playProgrammaticAnimation(int pokemon_id)
+{
   Serial.printf("Playing programmatic animation for Pokemon #%d\n", pokemon_id);
-  
+
   // 在螢幕中央區域顯示簡單動畫
   int16_t areaX = 20;
   int16_t areaY = 90;
   int16_t areaWidth = 200;
   int16_t areaHeight = 120;
-  
+
   // 使用既有的精靈動畫函數
   playEnhancedPokemonAnimation(pokemon_id, areaX, areaY, areaWidth, areaHeight, 3000);
 }
@@ -2023,15 +2078,17 @@ void loop()
     }
 
     // 使用新的動態載入系統
-    if (!loadAndDisplayPokemon(pokemonId)) {
+    if (!loadAndDisplayPokemon(pokemonId))
+    {
       Serial.printf("Failed to load Pokemon #%d dynamically\n", pokemonId);
       changeSystemState(ERROR_RECOVERY, "Dynamic loading failed");
       return;
     }
   }
-  
+
   // 處理錯誤恢復狀態
-  else if (currentState == ERROR_RECOVERY) {
+  else if (currentState == ERROR_RECOVERY)
+  {
     performSystemRecovery();
     changeSystemState(LISTENING, "Recovery completed");
     displayPokemonBallWelcome();
