@@ -3,7 +3,7 @@
  * 開發板：Wemos D1 R32
  * 功能：接收從寶貝球傳來的寶可夢編號，顯示對應的寶可夢資訊和動畫
  * 同時，它也會在啟動時顯示自己的 MAC 位址，以便設定發送端。
- * 版本：v5 (USB供電模式 - 測試階段)
+ * 版本：v6 (全新UI/UX排版)
  */
 
 // ESP-NOW and WiFi includes
@@ -37,7 +37,7 @@
 // 定義GIF顯示區域參數
 #define GIF_AREA_SIZE 144
 #define GIF_AREA_X ((240 - GIF_AREA_SIZE) / 2)
-#define GIF_AREA_Y 65
+#define GIF_AREA_Y 85 // Adjusted for new layout
 
 // Embedded Pokemon data removed - now using SD card JSON files only
 // (Previous embedded data was for testing only)
@@ -442,9 +442,7 @@ bool loadPokemonJSON(int pokemon_id)
   }
   jsonFile.close();
 
-  Serial.printf("DEBUG: Raw JSON content for Pokemon #%d:\n", pokemon_id);
-  Serial.println(jsonContent);
-  Serial.println("DEBUG: End of JSON content");
+  // Raw JSON debug print removed.
 
   // 解析JSON
   JsonDocument doc;
@@ -479,14 +477,7 @@ bool loadPokemonJSON(int pokemon_id)
   currentPokemon.weight = doc["weight"].as<int>();
   currentPokemon.loaded = true;
 
-  Serial.printf("DEBUG: Pokemon JSON loaded successfully!\n");
-  Serial.printf("  ID: %d\n", currentPokemon.id);
-  Serial.printf("  Name EN: '%s'\n", currentPokemon.name_en.c_str());
-  // Chinese name debug removed
-  Serial.printf("  Type1: '%s'\n", currentPokemon.type1.c_str());
-  Serial.printf("  Type2: '%s'\n", currentPokemon.type2.c_str());
-  Serial.printf("  Height: %d, Weight: %d\n", currentPokemon.height, currentPokemon.weight);
-  Serial.printf("  Loaded: %s\n", currentPokemon.loaded ? "true" : "false");
+  // Parsed JSON debug print removed.
 
   return true;
 }
@@ -932,6 +923,104 @@ void displayPokemonBallWelcome()
   Serial.println("Enhanced Pokemon Ball welcome screen displayed");
 }
 
+// Helper function to darken a 16-bit color
+uint16_t darkenColor(uint16_t color) {
+    uint8_t r = (color >> 11) & 0x1F;
+    uint8_t g = (color >> 5) & 0x3F;
+    uint8_t b = color & 0x1F;
+
+    r >>= 2; // Divide by 4 to make it darker
+    g >>= 2;
+    b >>= 2;
+
+    return (r << 11) | (g << 5) | b;
+}
+
+// Draws a vertical gradient background based on the Pokemon's primary type
+void drawBackgroundGradient(uint16_t typeColor) {
+    uint16_t startColor = darkenColor(typeColor);
+    uint16_t endColor = ILI9341_BLACK;
+
+    int16_t startR = (startColor >> 11) & 0x1F;
+    int16_t startG = (startColor >> 5) & 0x3F;
+    int16_t startB = startColor & 0x1F;
+
+    int16_t endR = (endColor >> 11) & 0x1F;
+    int16_t endG = (endColor >> 5) & 0x3F;
+    int16_t endB = endColor & 0x1F;
+
+    for (int16_t y = 0; y < tft.height(); y++) {
+        float ratio = (float)y / tft.height();
+        uint8_t r = (uint8_t)(startR + (endR - startR) * ratio);
+        uint8_t g = (uint8_t)(startG + (endG - startG) * ratio);
+        uint8_t b = (uint8_t)(startB + (endB - startB) * ratio);
+        tft.drawFastHLine(0, y, tft.width(), (r << 11) | (g << 5) | b);
+    }
+}
+
+// Draws the new styled header
+void drawHeader(const String& name, int id) {
+    tft.setTextColor(ILI9341_WHITE);
+    
+    // Draw Name, left aligned
+    tft.setTextSize(3);
+    tft.setCursor(15, 20);
+    tft.print(name);
+
+    // Draw ID, right aligned
+    tft.setTextSize(2);
+    char idText[8];
+    snprintf(idText, sizeof(idText), "#%03d", id);
+    int16_t idWidth = strlen(idText) * 12; // text size 2 = 12px width per char
+    tft.setCursor(tft.width() - idWidth - 15, 22);
+    tft.print(idText);
+}
+
+// Draws the new styled footer
+void drawFooter(float height, float weight) {
+    int16_t footerY = 245;
+    int16_t boxWidth = 100;
+    int16_t boxHeight = 50;
+    int16_t spacing = 20;
+    int16_t startX = (tft.width() - (2 * boxWidth + spacing)) / 2;
+    char valueText[16];
+    int16_t textWidth;
+    int16_t textX;
+
+    // Draw Height Box
+    tft.fillRoundRect(startX, footerY, boxWidth, boxHeight, 5, 0x3186); // Dark blue-gray
+    tft.drawRoundRect(startX, footerY, boxWidth, boxHeight, 5, ILI9341_WHITE);
+    
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(1);
+    tft.setCursor(startX + 28, footerY + 10);
+    tft.print("HEIGHT");
+
+    snprintf(valueText, sizeof(valueText), "%.1f m", height);
+    tft.setTextSize(2);
+    textWidth = strlen(valueText) * 12; // size 2 font is 12px wide
+    textX = startX + (boxWidth - textWidth) / 2;
+    tft.setCursor(textX, footerY + 25);
+    tft.print(valueText);
+
+    // Draw Weight Box
+    startX += boxWidth + spacing;
+    tft.fillRoundRect(startX, footerY, boxWidth, boxHeight, 5, 0x3186); // Dark blue-gray
+    tft.drawRoundRect(startX, footerY, boxWidth, boxHeight, 5, ILI9341_WHITE);
+
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(1);
+    tft.setCursor(startX + 28, footerY + 10);
+    tft.print("WEIGHT");
+
+    snprintf(valueText, sizeof(valueText), "%.1f kg", weight);
+    tft.setTextSize(2);
+    textWidth = strlen(valueText) * 12; // size 2 font is 12px wide
+    textX = startX + (boxWidth - textWidth) / 2;
+    tft.setCursor(textX, footerY + 25);
+    tft.print(valueText);
+}
+
 // Pokemon資訊顯示函數 - 使用SD卡載入的currentPokemon資料
 bool displayPokemonInfo(int id)
 {
@@ -1184,8 +1273,6 @@ bool loadAndDisplayPokemon(int pokemon_id)
     // 顯示Pokemon資訊和動畫。
     // displayDynamicPokemonData() 將會進入一個持續的GIF循環，
     // 直到新的NFC掃描發生。
-    Serial.printf("DEBUG: About to call displayDynamicPokemonData. currentPokemon.loaded=%s, currentPokemon.id=%d\n",
-                  currentPokemon.loaded ? "true" : "false", currentPokemon.id);
 
     // *** 核心變更 ***
     // 在進入GIF循環之前，將狀態切換回LISTENING，以便OnDataRecv回調可以接收下一個寶可夢ID。
@@ -1204,7 +1291,7 @@ bool loadAndDisplayPokemon(int pokemon_id)
   }
 }
 
-// 顯示動態載入的Pokemon資料
+// 顯示動態載入的Pokemon資料 (全新排版)
 void displayDynamicPokemonData()
 {
   if (!currentPokemon.loaded)
@@ -1213,60 +1300,31 @@ void displayDynamicPokemonData()
     return;
   }
 
-  Serial.printf("Displaying dynamic Pokemon: %s\n", currentPokemon.name_en.c_str());
+  Serial.printf("Displaying new layout for: %s\n", currentPokemon.name_en.c_str());
 
-  // 清除螢幕
-  tft.fillScreen(ILI9341_BLACK);
+  // 1. 繪製背景漸層
+  uint16_t primaryTypeColor = getTypeColor(currentPokemon.type1.c_str());
+  drawBackgroundGradient(primaryTypeColor);
 
-  // 顯示Pokemon ID
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  String idText = "#" + String(currentPokemon.id);
-  int16_t idX = (tft.width() - idText.length() * 12) / 2;
-  tft.setCursor(idX, 20);
-  tft.print(idText);
+  // 2. 繪製頁首 (名稱和ID)
+  drawHeader(currentPokemon.name_en, currentPokemon.id);
 
-  // 顯示英文名稱
-  int16_t nameX = (tft.width() - currentPokemon.name_en.length() * 12) / 2;
-  tft.setCursor(nameX, 45);
-  tft.print(currentPokemon.name_en);
+  // 3. 繪製屬性徽章 (名稱下方)
+  int16_t badgeY = 50;
+  int16_t badgeWidth = 65;
+  int16_t badgeHeight = 20;
+  uint16_t type2Color = getTypeColor(currentPokemon.type2.c_str());
 
-  // Chinese name display removed
-
-  // 顯示屬性標籤 (調整為適當間距)
-  int badgeY = 245; // 精靈結束於Y=220，留25px間距
-  int badgeWidth = 70;
-  int badgeHeight = 20;
-
+  drawTypeBadge(15, badgeY, badgeWidth, badgeHeight, currentPokemon.type1.c_str(), primaryTypeColor);
   if (currentPokemon.type2.length() > 0)
   {
-    // 雙屬性
-    drawTypeBadge(40, badgeY, badgeWidth, badgeHeight,
-                  currentPokemon.type1.c_str(), getTypeColor(currentPokemon.type1.c_str()));
-    drawTypeBadge(130, badgeY, badgeWidth, badgeHeight,
-                  currentPokemon.type2.c_str(), getTypeColor(currentPokemon.type2.c_str()));
-  }
-  else
-  {
-    // 單屬性
-    int singleBadgeX = (tft.width() - badgeWidth) / 2;
-    drawTypeBadge(singleBadgeX, badgeY, badgeWidth, badgeHeight,
-                  currentPokemon.type1.c_str(), getTypeColor(currentPokemon.type1.c_str()));
+    drawTypeBadge(15 + badgeWidth + 10, badgeY, badgeWidth, badgeHeight, currentPokemon.type2.c_str(), type2Color);
   }
 
-  // 顯示身高體重 (同一行)
-  tft.setTextSize(1);
-  float height = currentPokemon.height / 10.0;
-  float weight = currentPokemon.weight / 10.0;
+  // 4. 繪製頁尾 (身高和體重)
+  drawFooter(currentPokemon.height / 10.0, currentPokemon.weight / 10.0);
 
-  // 格式化為單行顯示: "Height: XX.X m     Weight: XX.X kg"
-  char statsText[64];
-  snprintf(statsText, sizeof(statsText), "Height: %.1fm     Weight: %.1fkg", height, weight);
-
-  tft.setCursor(20, 275); // 精靈結束於Y=220，屬性在Y=245，身高體重在Y=275
-  tft.print(statsText);
-
-  // 播放GIF動畫 (GIF-only mode)
+  // 5. 播放GIF動畫
   if (currentGIF.loaded)
   {
     playGIFFromMemory();
@@ -1274,11 +1332,15 @@ void displayDynamicPokemonData()
   else
   {
     Serial.printf("No GIF available for Pokemon #%d - showing border area only\n", currentPokemon.id);
-    // 顯示邊框區域以便調試
+    // 顯示錯誤提示
     tft.drawRect(GIF_AREA_X, GIF_AREA_Y, GIF_AREA_SIZE, GIF_AREA_SIZE, ILI9341_RED);
-    tft.drawRect(GIF_AREA_X + 1, GIF_AREA_Y + 1, GIF_AREA_SIZE - 2, GIF_AREA_SIZE - 2, ILI9341_YELLOW);
+    tft.setTextColor(ILI9341_YELLOW);
+    tft.setTextSize(1);
+    tft.setCursor(GIF_AREA_X + 10, GIF_AREA_Y + 10);
+    tft.print("GIF NOT FOUND");
   }
 }
+
 
 // GIF回調函數 - 在TFT上繪製GIF幀
 void GIFDraw(GIFDRAW *pDraw) {
@@ -1367,39 +1429,9 @@ void playGIFFromMemory()
     g_xOffset = squareX;
     g_yOffset = squareY;
 
-    // 詳細調試資訊
-    Serial.printf("=== GIF POSITIONING DEBUG ===\n");
-    Serial.printf("Square area: X=%d, Y=%d, Size=%dx%d\n", squareX, squareY, GIF_AREA_SIZE, GIF_AREA_SIZE);
-    Serial.printf("GIF dimensions: %dx%d\n", g_origWidth, g_origHeight);
-    Serial.printf("Calculated GIF position: X=%d, Y=%d\n", g_xOffset, g_yOffset);
-    Serial.printf("GIF will be centered in square: %s\n",
-                  (g_xOffset >= squareX && g_yOffset >= squareY) ? "YES" : "NO");
+    // Debugging print statements removed for clarity.
 
-    // 檢查GIF是否超出邊界
-    int16_t gifRight = g_xOffset + g_origWidth;
-    int16_t gifBottom = g_yOffset + g_origHeight;
-    int16_t squareRight = squareX + GIF_AREA_SIZE;
-    int16_t squareBottom = squareY + GIF_AREA_SIZE;
-
-    Serial.printf("GIF bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n",
-                  g_xOffset, gifRight, g_yOffset, gifBottom);
-    Serial.printf("Square bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n",
-                  squareX, squareRight, squareY, squareBottom);
-
-    if (gifRight > squareRight || gifBottom > squareBottom || g_xOffset < squareX || g_yOffset < squareY)
-    {
-      Serial.printf("WARNING: GIF extends beyond square boundaries!\n");
-    }
-
-    // 添加邊框以便調試 - 顯示GIF_AREA_SIZE正方形區域
-    tft.drawRect(squareX, squareY, GIF_AREA_SIZE, GIF_AREA_SIZE, ILI9341_RED);                    // 外邊框 (紅色)
-    tft.drawRect(squareX + 1, squareY + 1, GIF_AREA_SIZE - 2, GIF_AREA_SIZE - 2, ILI9341_YELLOW); // 內邊框 (黃色)
-
-    // 添加GIF實際邊界框 (藍色)
-    tft.drawRect(g_xOffset, g_yOffset, g_origWidth, g_origHeight, ILI9341_BLUE);
-
-    Serial.printf("DEBUG: Red/Yellow borders show intended square area\n");
-    Serial.printf("DEBUG: Blue border shows actual GIF area\n");
+    // Debugging borders removed.
 
     // 持續播放動畫，直到收到新的Pokemon ID
     Serial.println("Entering continuous GIF playback loop...");
