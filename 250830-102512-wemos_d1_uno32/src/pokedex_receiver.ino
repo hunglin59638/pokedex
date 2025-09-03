@@ -1287,9 +1287,9 @@ void GIFDraw(GIFDRAW *pDraw) {
     uint8_t *pPixels = pDraw->pPixels;
     uint16_t *pPalette = pDraw->pPalette;
 
-    // A more reliable check for the start of a new frame to clear the background.
-    // This is crucial for GIFs that use transparency and different disposal methods.
-    if (pDraw->y == 0 && pDraw->iX == 0 && pDraw->iY == 0) {
+    // To fix ghosting, the canvas is cleared before drawing the first line of a frame.
+    // This was the original fix from the changelog and is more reliable than other checks.
+    if (pDraw->y == 0) {
         tft.fillRect(g_xOffset, g_yOffset, g_canvasWidth, g_canvasHeight, ILI9341_BLACK);
     }
 
