@@ -34,6 +34,11 @@
 // 定義SD卡引腳 (重新啟用)
 #define SD_CS 14 // SD卡片選引腳
 
+// 定義GIF顯示區域參數
+#define GIF_AREA_SIZE 150
+#define GIF_AREA_X ((240 - GIF_AREA_SIZE) / 2)
+#define GIF_AREA_Y 65
+
 // Embedded Pokemon data removed - now using SD card JSON files only
 // (Previous embedded data was for testing only)
 
@@ -112,6 +117,9 @@ int16_t g_xOffset = 0;
 int16_t g_yOffset = 0;
 int16_t g_canvasWidth = 0;
 int16_t g_canvasHeight = 0;
+// Add globals for scaling
+int16_t g_origWidth = 0;
+int16_t g_origHeight = 0;
 
 // Pokemon data lookup removed - now using currentPokemon loaded from SD card JSON
 // All Pokemon data access goes through loadAndDisplayPokemon() -> currentPokemon
@@ -1267,8 +1275,8 @@ void displayDynamicPokemonData()
   {
     Serial.printf("No GIF available for Pokemon #%d - showing border area only\n", currentPokemon.id);
     // 顯示邊框區域以便調試
-    tft.drawRect(45, 70, 150, 150, ILI9341_RED);
-    tft.drawRect(46, 71, 148, 148, ILI9341_YELLOW);
+    tft.drawRect(GIF_AREA_X, GIF_AREA_Y, GIF_AREA_SIZE, GIF_AREA_SIZE, ILI9341_RED);
+    tft.drawRect(GIF_AREA_X + 1, GIF_AREA_Y + 1, GIF_AREA_SIZE - 2, GIF_AREA_SIZE - 2, ILI9341_YELLOW);
   }
 }
 
@@ -1278,54 +1286,58 @@ void GIFDraw(GIFDRAW *pDraw)
   if (!pDraw)
     return;
 
-  // Clear only the GIF canvas area before drawing the first line of each frame
-  // This fixes the 殘影 (ghosting) issue caused by different transparency regions between frames
+  uint8_t *pPixels = pDraw->pPixels;
+  uint16_t *pPalette = pDraw->pPalette;
+
+  // Clear the entire target area before drawing the first line of a new frame
   if (pDraw->y == 0)
   {
     tft.fillRect(g_xOffset, g_yOffset, g_canvasWidth, g_canvasHeight, ILI9341_BLACK);
   }
 
-  uint8_t *s;
-  uint16_t *d, *usPalette, usTemp[320];
-  int x, y, iWidth;
+  // Calculate scaling factors.
+  float scaleX = (float)g_origWidth / g_canvasWidth;
+  float scaleY = (float)g_origHeight / g_canvasHeight;
 
-  iWidth = pDraw->iWidth;
-  if (iWidth > 240) // TFT寬度限制
-    iWidth = 240;
+  // This buffer will hold one scaled line of the image
+  uint16_t scaledLineBuffer[g_canvasWidth];
 
-  usPalette = pDraw->pPalette;
-  y = pDraw->iY + pDraw->y; // current line
-
-  // Use global offsets for consistent positioning with canvas clearing
-  int gif_x_offset = g_xOffset;
-  int gif_y_offset = g_yOffset;
-
-  s = pDraw->pPixels;
-
-  // Convert and handle transparency properly - replace transparent pixels with black
-  for (x = 0; x < iWidth; x++)
+  // Generate the scaled line of pixels (Horizontal Scaling)
+  for (int x = 0; x < g_canvasWidth; x++)
   {
-    uint8_t idx = s[x];
+    int src_x = (int)(x * scaleX);
+    if (src_x >= g_origWidth)
+      src_x = g_origWidth - 1;
+
+    uint8_t idx = pPixels[src_x];
     uint16_t color;
 
     if (pDraw->ucHasTransparency && idx == pDraw->ucTransparent)
     {
-      color = ILI9341_BLACK; // Replace transparent with black (fixes green background issue)
+      color = ILI9341_BLACK; // Use black for transparent pixels
     }
     else
     {
-      color = usPalette[idx];
+      color = pPalette[idx];
     }
-
-    usTemp[x] = color;
+    scaledLineBuffer[x] = color;
   }
 
-  // Draw the converted line to TFT
+  // Calculate which destination rows this source row corresponds to (Vertical Scaling)
+  int y_start = (int)(pDraw->y / scaleY);
+  int y_end = (int)((pDraw->y + 1) / scaleY);
+  if (y_end > g_canvasHeight)
+    y_end = g_canvasHeight;
+
+  // Draw the scaled line onto the TFT for each corresponding destination row
   tft.startWrite();
-  tft.setAddrWindow(gif_x_offset, gif_y_offset + y, iWidth, 1);
-  tft.writePixels(usTemp, iWidth);
+  for (int y = y_start; y < y_end; y++)
+  {
+    tft.setAddrWindow(g_xOffset, g_yOffset + y, g_canvasWidth, 1);
+    tft.writePixels(scaledLineBuffer, g_canvasWidth);
+  }
   tft.endWrite();
-} /* GIFDraw() */
+}
 
 // 從記憶體播放GIF動畫
 void playGIFFromMemory()
@@ -1342,37 +1354,36 @@ void playGIFFromMemory()
   if (gif.open(currentGIF.gif_data, currentGIF.gif_size, GIFDraw))
   {
     // Get GIF dimensions and calculate canvas area for frame clearing
-    int16_t origWidth = gif.getCanvasWidth();
-    int16_t origHeight = gif.getCanvasHeight();
+    g_origWidth = gif.getCanvasWidth();
+    g_origHeight = gif.getCanvasHeight();
 
-    Serial.printf("GIF opened successfully: %dx%d\n", origWidth, origHeight);
+    Serial.printf("GIF opened successfully: %dx%d, scaling to %dx%d\n", g_origWidth, g_origHeight, GIF_AREA_SIZE, GIF_AREA_SIZE);
 
-    // Calculate canvas position and dimensions (centered within 150x150 square)
-    g_canvasWidth = origWidth;
-    g_canvasHeight = origHeight;
+    // Set the global canvas size to the target rendering size
+    g_canvasWidth = GIF_AREA_SIZE;
+    g_canvasHeight = GIF_AREA_SIZE;
 
-    // 定義150x150正方形區域
-    int16_t squareX = 45; // 居中: (240-150)/2 = 45
-    int16_t squareY = 70; // 與程式化動畫一致
-    int16_t squareSize = 150;
+    // Use the predefined square area
+    int16_t squareX = GIF_AREA_X;
+    int16_t squareY = GIF_AREA_Y;
 
-    // 將GIF居中在正方形內，而不是居中在整個螢幕上
-    g_xOffset = squareX + (squareSize - origWidth) / 2;
-    g_yOffset = squareY + (squareSize - origHeight) / 2;
+    // The scaled GIF will start at the top-left of the defined area
+    g_xOffset = squareX;
+    g_yOffset = squareY;
 
     // 詳細調試資訊
     Serial.printf("=== GIF POSITIONING DEBUG ===\n");
-    Serial.printf("Square area: X=%d, Y=%d, Size=%dx%d\n", squareX, squareY, squareSize, squareSize);
-    Serial.printf("GIF dimensions: %dx%d\n", origWidth, origHeight);
+    Serial.printf("Square area: X=%d, Y=%d, Size=%dx%d\n", squareX, squareY, GIF_AREA_SIZE, GIF_AREA_SIZE);
+    Serial.printf("GIF dimensions: %dx%d\n", g_origWidth, g_origHeight);
     Serial.printf("Calculated GIF position: X=%d, Y=%d\n", g_xOffset, g_yOffset);
     Serial.printf("GIF will be centered in square: %s\n",
                   (g_xOffset >= squareX && g_yOffset >= squareY) ? "YES" : "NO");
 
     // 檢查GIF是否超出邊界
-    int16_t gifRight = g_xOffset + origWidth;
-    int16_t gifBottom = g_yOffset + origHeight;
-    int16_t squareRight = squareX + squareSize;
-    int16_t squareBottom = squareY + squareSize;
+    int16_t gifRight = g_xOffset + g_origWidth;
+    int16_t gifBottom = g_yOffset + g_origHeight;
+    int16_t squareRight = squareX + GIF_AREA_SIZE;
+    int16_t squareBottom = squareY + GIF_AREA_SIZE;
 
     Serial.printf("GIF bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n",
                   g_xOffset, gifRight, g_yOffset, gifBottom);
@@ -1384,12 +1395,12 @@ void playGIFFromMemory()
       Serial.printf("WARNING: GIF extends beyond square boundaries!\n");
     }
 
-    // 添加邊框以便調試 - 顯示150x150正方形區域
-    tft.drawRect(squareX, squareY, squareSize, squareSize, ILI9341_RED);                    // 外邊框 (紅色)
-    tft.drawRect(squareX + 1, squareY + 1, squareSize - 2, squareSize - 2, ILI9341_YELLOW); // 內邊框 (黃色)
+    // 添加邊框以便調試 - 顯示GIF_AREA_SIZE正方形區域
+    tft.drawRect(squareX, squareY, GIF_AREA_SIZE, GIF_AREA_SIZE, ILI9341_RED);                    // 外邊框 (紅色)
+    tft.drawRect(squareX + 1, squareY + 1, GIF_AREA_SIZE - 2, GIF_AREA_SIZE - 2, ILI9341_YELLOW); // 內邊框 (黃色)
 
     // 添加GIF實際邊界框 (藍色)
-    tft.drawRect(g_xOffset, g_yOffset, origWidth, origHeight, ILI9341_BLUE);
+    tft.drawRect(g_xOffset, g_yOffset, g_origWidth, g_origHeight, ILI9341_BLUE);
 
     Serial.printf("DEBUG: Red/Yellow borders show intended square area\n");
     Serial.printf("DEBUG: Blue border shows actual GIF area\n");
