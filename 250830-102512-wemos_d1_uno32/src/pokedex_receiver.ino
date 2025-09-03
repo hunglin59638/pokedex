@@ -794,6 +794,20 @@ void playEnhancedPokemonAnimation(int id, int16_t areaX, int16_t areaY, int16_t 
   int16_t spriteSize = min(areaWidth, areaHeight) / 2;
   int16_t spriteX = areaX + areaWidth / 2;
   int16_t spriteY = areaY + areaHeight / 2;
+  
+  // 詳細調試資訊
+  Serial.printf("=== SPRITE ANIMATION DEBUG ===\n");
+  Serial.printf("Area bounds: X=%d, Y=%d, W=%d, H=%d\n", areaX, areaY, areaWidth, areaHeight);
+  Serial.printf("Calculated sprite: Center=(%d,%d), Size=%d\n", spriteX, spriteY, spriteSize);
+  Serial.printf("Sprite bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n", 
+                spriteX-spriteSize, spriteX+spriteSize, spriteY-spriteSize, spriteY+spriteSize);
+  
+  // 檢查精靈是否超出區域邊界
+  if (spriteX - spriteSize < areaX || spriteX + spriteSize > areaX + areaWidth ||
+      spriteY - spriteSize < areaY || spriteY + spriteSize > areaY + areaHeight) {
+    Serial.printf("WARNING: Sprite extends beyond area boundaries!\n");
+    Serial.printf("Consider reducing sprite size to fit within bounds\n");
+  }
 
   // Particle system for sparkle effects
   struct Particle
@@ -1573,14 +1587,51 @@ void playGIFFromMemory()
 
     Serial.printf("GIF opened successfully: %dx%d\n", origWidth, origHeight);
 
-    // Calculate canvas position and dimensions (same logic as current GIFDraw positioning)
+    // Calculate canvas position and dimensions (centered within 130x130 square)
     g_canvasWidth = origWidth;
     g_canvasHeight = origHeight;
-    g_xOffset = (tft.width() - origWidth) / 2;
-    g_yOffset = 90; // 在Pokemon資訊下方 (matches current gif_y_offset)
+    
+    // 定義130x130正方形區域
+    int16_t squareX = 55;
+    int16_t squareY = 80;
+    int16_t squareSize = 130;
+    
+    // 將GIF居中在正方形內，而不是居中在整個螢幕上
+    g_xOffset = squareX + (squareSize - origWidth) / 2;
+    g_yOffset = squareY + (squareSize - origHeight) / 2;
 
-    Serial.printf("GIF canvas area: %dx%d at offset (%d,%d)\n",
-                  g_canvasWidth, g_canvasHeight, g_xOffset, g_yOffset);
+    // 詳細調試資訊
+    Serial.printf("=== GIF POSITIONING DEBUG ===\n");
+    Serial.printf("Square area: X=%d, Y=%d, Size=%dx%d\n", squareX, squareY, squareSize, squareSize);
+    Serial.printf("GIF dimensions: %dx%d\n", origWidth, origHeight);
+    Serial.printf("Calculated GIF position: X=%d, Y=%d\n", g_xOffset, g_yOffset);
+    Serial.printf("GIF will be centered in square: %s\n", 
+                  (g_xOffset >= squareX && g_yOffset >= squareY) ? "YES" : "NO");
+    
+    // 檢查GIF是否超出邊界
+    int16_t gifRight = g_xOffset + origWidth;
+    int16_t gifBottom = g_yOffset + origHeight;
+    int16_t squareRight = squareX + squareSize;
+    int16_t squareBottom = squareY + squareSize;
+    
+    Serial.printf("GIF bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n", 
+                  g_xOffset, gifRight, g_yOffset, gifBottom);
+    Serial.printf("Square bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n", 
+                  squareX, squareRight, squareY, squareBottom);
+    
+    if (gifRight > squareRight || gifBottom > squareBottom || g_xOffset < squareX || g_yOffset < squareY) {
+        Serial.printf("WARNING: GIF extends beyond square boundaries!\n");
+    }
+
+    // 添加邊框以便調試 - 顯示130x130正方形區域
+    tft.drawRect(squareX, squareY, squareSize, squareSize, ILI9341_RED);        // 外邊框 (紅色)
+    tft.drawRect(squareX+1, squareY+1, squareSize-2, squareSize-2, ILI9341_YELLOW); // 內邊框 (黃色)
+    
+    // 添加GIF實際邊界框 (藍色)
+    tft.drawRect(g_xOffset, g_yOffset, origWidth, origHeight, ILI9341_BLUE);
+    
+    Serial.printf("DEBUG: Red/Yellow borders show intended square area\n");
+    Serial.printf("DEBUG: Blue border shows actual GIF area\n");
 
     // 播放3秒的動畫
     unsigned long startTime = millis();
@@ -1607,11 +1658,23 @@ void playProgrammaticAnimation(int pokemon_id)
 {
   Serial.printf("Playing programmatic animation for Pokemon #%d\n", pokemon_id);
 
-  // 在螢幕中央區域顯示簡單動畫
-  int16_t areaX = 20;
-  int16_t areaY = 90;
-  int16_t areaWidth = 200;
-  int16_t areaHeight = 120;
+  // 在螢幕中央區域顯示簡單動畫 - 使用130x130正方形
+  int16_t areaX = 55;   // 居中: (240-130)/2 = 55
+  int16_t areaY = 80;   // 稍微上移以更好適配
+  int16_t areaWidth = 130;  // 正方形寬度
+  int16_t areaHeight = 130; // 正方形高度
+
+  // 詳細調試資訊
+  Serial.printf("=== PROGRAMMATIC ANIMATION DEBUG ===\n");
+  Serial.printf("Animation area: X=%d, Y=%d, Size=%dx%d\n", areaX, areaY, areaWidth, areaHeight);
+  Serial.printf("Expected sprite center: X=%d, Y=%d\n", 
+                areaX + areaWidth/2, areaY + areaHeight/2);
+  
+  // 添加邊框以便調試 - 顯示130x130正方形區域
+  tft.drawRect(areaX, areaY, areaWidth, areaHeight, ILI9341_RED);        // 外邊框 (紅色)
+  tft.drawRect(areaX+1, areaY+1, areaWidth-2, areaHeight-2, ILI9341_YELLOW); // 內邊框 (黃色)
+  
+  Serial.printf("DEBUG: Red/Yellow borders show animation area boundaries\n");
 
   // 使用既有的精靈動畫函數
   playEnhancedPokemonAnimation(pokemon_id, areaX, areaY, areaWidth, areaHeight, 3000);
@@ -1682,8 +1745,8 @@ bool displayPokemonPage(int id)
     return false;
   }
 
-  // Step 6: Play enhanced sprite animation with particle effects
-  playEnhancedPokemonAnimation(id, 20, 90, 200, 120, 3000);
+  // Step 6: Play enhanced sprite animation with particle effects - 使用130x130正方形
+  playEnhancedPokemonAnimation(id, 55, 80, 130, 130, 3000);
 
   Serial.printf("Pokemon #%d page displayed successfully with enhanced experience\n", id);
   return true;
