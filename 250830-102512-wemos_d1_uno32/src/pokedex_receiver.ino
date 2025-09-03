@@ -500,8 +500,8 @@ bool loadPokemonGIF(int pokemon_id)
 
   // 檢查記憶體是否足夠
   size_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < gifSize + 50000)
-  { // 保留50KB緩衝
+  if (freeHeap < gifSize + 50000) // 保留50KB緩衝
+  {
     Serial.printf("Insufficient memory for GIF (need %d, have %d)\n", gifSize, freeHeap);
     gifFile.close();
     return false;
@@ -666,11 +666,11 @@ void drawEllipse(int16_t centerX, int16_t centerY, int16_t width, int16_t height
 void playEnhancedPokemonAnimation(int id, int16_t areaX, int16_t areaY, int16_t areaWidth, int16_t areaHeight, int duration_ms = 3000)
 {
   Serial.printf("GIF-only mode: No programmatic animation for Pokemon #%d\n", id);
-  
+
   // Just show the border area for debugging in GIF-only mode
   tft.drawRect(areaX, areaY, areaWidth, areaHeight, ILI9341_RED);
   tft.drawRect(areaX + 1, areaY + 1, areaWidth - 2, areaHeight - 2, ILI9341_YELLOW);
-  
+
   Serial.printf("Showing 150x150 border area at X=%d, Y=%d for GIF placeholder\n", areaX, areaY);
 }
 
@@ -1170,18 +1170,22 @@ bool loadAndDisplayPokemon(int pokemon_id)
   // 6. 檢查載入結果並顯示
   if (loadSuccess)
   {
-    changeSystemState(DISPLAYING, "Data loaded successfully");
+    // 狀態：正在顯示靜態資訊
+    changeSystemState(DISPLAYING, "Data loaded, showing info");
 
-    // 顯示Pokemon資訊和動畫
+    // 顯示Pokemon資訊和動畫。
+    // displayDynamicPokemonData() 將會進入一個持續的GIF循環，
+    // 直到新的NFC掃描發生。
     Serial.printf("DEBUG: About to call displayDynamicPokemonData. currentPokemon.loaded=%s, currentPokemon.id=%d\n",
                   currentPokemon.loaded ? "true" : "false", currentPokemon.id);
+
+    // *** 核心變更 ***
+    // 在進入GIF循環之前，將狀態切換回LISTENING，以便OnDataRecv回調可以接收下一個寶可夢ID。
+    changeSystemState(LISTENING, "Displaying GIF, ready for next scan");
     displayDynamicPokemonData();
 
-    // 顯示5秒後回到監聽狀態
-    delay(5000);
-    changeSystemState(LISTENING, "Display completed");
-    displayPokemonBallWelcome();
-
+    // 當displayDynamicPokemonData()返回時，代表已經收到了新的寶可夢ID。
+    // 我們不需要再做任何事，直接返回true，主循環會處理新的請求。
     return true;
   }
   else
@@ -1390,19 +1394,20 @@ void playGIFFromMemory()
     Serial.printf("DEBUG: Red/Yellow borders show intended square area\n");
     Serial.printf("DEBUG: Blue border shows actual GIF area\n");
 
-    // 播放3秒的動畫
-    unsigned long startTime = millis();
-    while (millis() - startTime < 3000)
+    // 持續播放動畫，直到收到新的Pokemon ID
+    Serial.println("Entering continuous GIF playback loop...");
+    while (!newDataReceived) // Loop until a new Pokemon is scanned
     {
       if (!gif.playFrame(true, NULL))
       {
-        gif.reset(); // 重新開始播放
+        gif.reset(); // Loop the GIF
       }
-      delay(50); // 固定延遲，大約20fps
+      esp_task_wdt_reset(); // Feed the watchdog
+      delay(50);            // Approx 20 FPS, and allows other tasks to run
     }
 
     gif.close();
-    Serial.println("GIF playback completed");
+    Serial.println("New data received, exiting GIF playback.");
   }
   else
   {
@@ -1629,22 +1634,22 @@ bool initESPNOW_PowerOptimized()
   tft.setCursor(10, 300);
   tft.println("Please wait...");
 
-  safeDelay(500);
+  safeDelay(100);
 
   // 設定 Wi-Fi 模式
   Serial.println("Step 1: 設定WiFi模式...");
   WiFi.mode(WIFI_STA);
-  safeDelay(500);
+  safeDelay(100);
 
   // 設定頻道
   Serial.println("Step 2: 設定WiFi頻道...");
   WiFi.channel(WIFI_CHANNEL);
-  safeDelay(300);
+  safeDelay(100);
 
   // 初始化 ESP-NOW
   Serial.println("Step 3: 初始化ESP-NOW...");
   esp_err_t initResult = esp_now_init();
-  safeDelay(300);
+  safeDelay(100);
 
   if (initResult != ESP_OK)
   {
@@ -1670,7 +1675,7 @@ bool initESPNOW_PowerOptimized()
     // 註冊回調函數
     Serial.println("Step 4: 註冊回調函數...");
     esp_now_register_recv_cb(OnDataRecv);
-    safeDelay(200);
+    safeDelay(100);
 
     Serial.println("ESP-NOW 接收器已就緒");
   }
