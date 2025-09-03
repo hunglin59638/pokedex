@@ -1281,62 +1281,58 @@ void displayDynamicPokemonData()
 }
 
 // GIF回調函數 - 在TFT上繪製GIF幀
-void GIFDraw(GIFDRAW *pDraw)
-{
-  if (!pDraw)
-    return;
+void GIFDraw(GIFDRAW *pDraw) {
+    if (!pDraw) return;
 
-  uint8_t *pPixels = pDraw->pPixels;
-  uint16_t *pPalette = pDraw->pPalette;
+    uint8_t *pPixels = pDraw->pPixels;
+    uint16_t *pPalette = pDraw->pPalette;
 
-  // Clear the entire target area before drawing the first line of a new frame
-  if (pDraw->y == 0)
-  {
-    tft.fillRect(g_xOffset, g_yOffset, g_canvasWidth, g_canvasHeight, ILI9341_BLACK);
-  }
-
-  // Calculate scaling factors.
-  float scaleX = (float)g_origWidth / g_canvasWidth;
-  float scaleY = (float)g_origHeight / g_canvasHeight;
-
-  // This buffer will hold one scaled line of the image
-  uint16_t scaledLineBuffer[g_canvasWidth];
-
-  // Generate the scaled line of pixels (Horizontal Scaling)
-  for (int x = 0; x < g_canvasWidth; x++)
-  {
-    int src_x = (int)(x * scaleX);
-    if (src_x >= g_origWidth)
-      src_x = g_origWidth - 1;
-
-    uint8_t idx = pPixels[src_x];
-    uint16_t color;
-
-    if (pDraw->ucHasTransparency && idx == pDraw->ucTransparent)
-    {
-      color = ILI9341_BLACK; // Use black for transparent pixels
+    // A more reliable check for the start of a new frame to clear the background.
+    // This is crucial for GIFs that use transparency and different disposal methods.
+    if (pDraw->y == 0 && pDraw->iX == 0 && pDraw->iY == 0) {
+        tft.fillRect(g_xOffset, g_yOffset, g_canvasWidth, g_canvasHeight, ILI9341_BLACK);
     }
-    else
-    {
-      color = pPalette[idx];
+
+    // Scaling factors
+    float scaleX = (float)g_canvasWidth / g_origWidth;
+    float scaleY = (float)g_canvasHeight / g_origHeight;
+
+    // Calculate destination drawing parameters based on the partial update's position and size
+    int16_t destX = g_xOffset + (int16_t)(pDraw->iX * scaleX);
+    int16_t destY_start = g_yOffset + (int16_t)((pDraw->iY + pDraw->y) * scaleY);
+    int16_t destY_end = g_yOffset + (int16_t)((pDraw->iY + pDraw->y + 1) * scaleY);
+    int16_t destW = (int16_t)(pDraw->iWidth * scaleX);
+
+    if (destW <= 0) return; // Nothing to draw
+
+    // Create a buffer for the scaled partial line
+    uint16_t scaledLineBuffer[destW];
+
+    // Generate the scaled line of pixels for the partial width
+    for (int x = 0; x < destW; x++) {
+        int src_x = (int)(x / scaleX);
+        if (src_x >= pDraw->iWidth) src_x = pDraw->iWidth - 1;
+
+        uint8_t idx = pPixels[src_x];
+        uint16_t color;
+
+        if (pDraw->ucHasTransparency && idx == pDraw->ucTransparent) {
+            color = ILI9341_BLACK; // Render transparent pixels as black
+        } else {
+            color = pPalette[idx];
+        }
+        scaledLineBuffer[x] = color;
     }
-    scaledLineBuffer[x] = color;
-  }
 
-  // Calculate which destination rows this source row corresponds to (Vertical Scaling)
-  int y_start = (int)(pDraw->y / scaleY);
-  int y_end = (int)((pDraw->y + 1) / scaleY);
-  if (y_end > g_canvasHeight)
-    y_end = g_canvasHeight;
-
-  // Draw the scaled line onto the TFT for each corresponding destination row
-  tft.startWrite();
-  for (int y = y_start; y < y_end; y++)
-  {
-    tft.setAddrWindow(g_xOffset, g_yOffset + y, g_canvasWidth, 1);
-    tft.writePixels(scaledLineBuffer, g_canvasWidth);
-  }
-  tft.endWrite();
+    // Draw the scaled partial line buffer multiple times for vertical scaling
+    tft.startWrite();
+    for (int y = destY_start; y < destY_end; y++) {
+        if (y < (g_yOffset + g_canvasHeight)) { // Ensure we don't draw outside the canvas
+            tft.setAddrWindow(destX, y, destW, 1);
+            tft.writePixels(scaledLineBuffer, destW);
+        }
+    }
+    tft.endWrite();
 }
 
 // 從記憶體播放GIF動畫
