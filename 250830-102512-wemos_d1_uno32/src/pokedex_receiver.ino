@@ -35,7 +35,7 @@
 #define SD_CS 14 // SD卡片選引腳
 
 // 定義GIF顯示區域參數
-#define GIF_AREA_SIZE 150
+#define GIF_AREA_SIZE 144
 #define GIF_AREA_X ((240 - GIF_AREA_SIZE) / 2)
 #define GIF_AREA_Y 65
 
