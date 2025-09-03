@@ -692,86 +692,9 @@ void drawEllipse(int16_t centerX, int16_t centerY, int16_t width, int16_t height
   }
 }
 
-void drawSimplePokemonSprite(int16_t x, int16_t y, int16_t size, uint16_t color1, uint16_t color2, uint16_t color3, int frame)
-{
-  // 簡單的精靈動畫 - 3幀動畫效果
-  int16_t offset = (frame % 3 - 1) * 2; // -2, 0, +2 像素偏移
+// drawSimplePokemonSprite function removed - using GIF animations only
 
-  // 主體 (橢圓形)
-  int16_t bodyWidth = size;
-  int16_t bodyHeight = size * 0.8;
-
-  fillEllipse(x, y + offset, bodyWidth, bodyHeight, color1);
-
-  // 陰影/邊框
-  drawEllipse(x, y + offset, bodyWidth, bodyHeight, ILI9341_BLACK);
-  drawEllipse(x, y + offset, bodyWidth - 1, bodyHeight - 1, color2);
-
-  // 眼睛 (簡單的點)
-  int16_t eyeY = y - bodyHeight / 4 + offset;
-  tft.fillCircle(x - bodyWidth / 4, eyeY, 3, color3);
-  tft.fillCircle(x + bodyWidth / 4, eyeY, 3, color3);
-
-  // 眼睛高光
-  tft.fillCircle(x - bodyWidth / 4, eyeY - 1, 1, ILI9341_WHITE);
-  tft.fillCircle(x + bodyWidth / 4, eyeY - 1, 1, ILI9341_WHITE);
-
-  // 嘴巴 (小弧線)
-  int16_t mouthY = y + bodyHeight / 6 + offset;
-  for (int i = -3; i <= 3; i++)
-  {
-    if (abs(i) <= 2)
-    { // 創建弧形
-      tft.drawPixel(x + i, mouthY + abs(i) / 2, color3);
-    }
-  }
-}
-
-// 播放Pokemon精靈動畫
-void playPokemonSpriteAnimation(int id, int16_t areaX, int16_t areaY, int16_t areaWidth, int16_t areaHeight, int duration_ms = 3000)
-{
-  const PokemonSprite *sprite = findPokemonSprite(id);
-  if (!sprite)
-  {
-    Serial.printf("No sprite data for Pokemon ID %d\n", id);
-    return;
-  }
-
-  // 從PROGMEM讀取精靈資料
-  PokemonSprite spriteData;
-  memcpy_P(&spriteData, sprite, sizeof(PokemonSprite));
-
-  Serial.printf("Playing sprite animation for Pokemon #%d\n", id);
-
-  // 計算精靈大小和位置
-  int16_t spriteSize = min(areaWidth, areaHeight) / 2;
-  int16_t spriteX = areaX + areaWidth / 2;
-  int16_t spriteY = areaY + areaHeight / 2;
-
-  unsigned long startTime = millis();
-  int frame = 0;
-
-  while (millis() - startTime < duration_ms)
-  {
-    // 清除動畫區域
-    tft.fillRect(areaX, areaY, areaWidth, areaHeight, ILI9341_BLACK);
-
-    // 繪製精靈動畫幀
-    drawSimplePokemonSprite(spriteX, spriteY, spriteSize,
-                            spriteData.color1, spriteData.color2, spriteData.color3, frame);
-
-    // 更新幀計數器
-    frame++;
-
-    // 控制動畫速度 (約10 FPS)
-    delay(100);
-
-    // 餵看門狗
-    esp_task_wdt_reset();
-  }
-
-  Serial.printf("Sprite animation completed for Pokemon #%d\n", id);
-}
+// playPokemonSpriteAnimation function removed - using GIF animations only
 
 // Enhanced Pokemon animation with particle effects and sparkles
 void playEnhancedPokemonAnimation(int id, int16_t areaX, int16_t areaY, int16_t areaWidth, int16_t areaHeight, int duration_ms = 3000)
@@ -779,8 +702,7 @@ void playEnhancedPokemonAnimation(int id, int16_t areaX, int16_t areaY, int16_t 
   const PokemonSprite *sprite = findPokemonSprite(id);
   if (!sprite)
   {
-    Serial.printf("No sprite data for Pokemon ID %d, using basic animation\n", id);
-    playPokemonSpriteAnimation(id, areaX, areaY, areaWidth, areaHeight, duration_ms);
+    Serial.printf("No sprite data for Pokemon ID %d, GIF-only mode\n", id);
     return;
   }
 
@@ -790,21 +712,22 @@ void playEnhancedPokemonAnimation(int id, int16_t areaX, int16_t areaY, int16_t 
 
   Serial.printf("Playing enhanced animation for Pokemon #%d\n", id);
 
-  // 計算精靈大小和位置
-  int16_t spriteSize = min(areaWidth, areaHeight) / 2;
+  // 計算精靈大小和位置 - 使用更大的比例填滿150x150區域
+  int16_t spriteSize = min(areaWidth, areaHeight) / 1.2; // 改為除以1.2，讓精靈更大 (150/1.2=125px)
   int16_t spriteX = areaX + areaWidth / 2;
   int16_t spriteY = areaY + areaHeight / 2;
-  
+
   // 詳細調試資訊
   Serial.printf("=== SPRITE ANIMATION DEBUG ===\n");
   Serial.printf("Area bounds: X=%d, Y=%d, W=%d, H=%d\n", areaX, areaY, areaWidth, areaHeight);
   Serial.printf("Calculated sprite: Center=(%d,%d), Size=%d\n", spriteX, spriteY, spriteSize);
-  Serial.printf("Sprite bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n", 
-                spriteX-spriteSize, spriteX+spriteSize, spriteY-spriteSize, spriteY+spriteSize);
-  
+  Serial.printf("Sprite bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n",
+                spriteX - spriteSize, spriteX + spriteSize, spriteY - spriteSize, spriteY + spriteSize);
+
   // 檢查精靈是否超出區域邊界
   if (spriteX - spriteSize < areaX || spriteX + spriteSize > areaX + areaWidth ||
-      spriteY - spriteSize < areaY || spriteY + spriteSize > areaY + areaHeight) {
+      spriteY - spriteSize < areaY || spriteY + spriteSize > areaY + areaHeight)
+  {
     Serial.printf("WARNING: Sprite extends beyond area boundaries!\n");
     Serial.printf("Consider reducing sprite size to fit within bounds\n");
   }
@@ -877,9 +800,8 @@ void playEnhancedPokemonAnimation(int id, int16_t areaX, int16_t areaY, int16_t 
       }
     }
 
-    // 繪製精靈動畫幀 with enhanced effects
-    drawSimplePokemonSprite(spriteX, spriteY, spriteSize,
-                            spriteData.color1, spriteData.color2, spriteData.color3, frame);
+    // Programmatic sprite drawing removed - GIF-only mode
+    // Just show the border area for debugging
 
     // Add glow effect around sprite every few frames
     if (frame % 15 == 0)
@@ -1465,8 +1387,8 @@ void displayDynamicPokemonData()
 
   // Chinese name display removed
 
-  // 顯示屬性標籤
-  int badgeY = 250;
+  // 顯示屬性標籤 (調整為適當間距)
+  int badgeY = 245; // 精靈結束於Y=220，留25px間距
   int badgeWidth = 70;
   int badgeHeight = 20;
 
@@ -1486,29 +1408,29 @@ void displayDynamicPokemonData()
                   currentPokemon.type1.c_str(), getTypeColor(currentPokemon.type1.c_str()));
   }
 
-  // 顯示身高體重
+  // 顯示身高體重 (同一行)
   tft.setTextSize(1);
   float height = currentPokemon.height / 10.0;
   float weight = currentPokemon.weight / 10.0;
 
-  char heightText[32], weightText[32];
-  snprintf(heightText, sizeof(heightText), "Height: %.1fm", height);
-  snprintf(weightText, sizeof(weightText), "Weight: %.1fkg", weight);
+  // 格式化為單行顯示: "Height: XX.X m     Weight: XX.X kg"
+  char statsText[64];
+  snprintf(statsText, sizeof(statsText), "Height: %.1fm     Weight: %.1fkg", height, weight);
 
-  tft.setCursor(20, 280);
-  tft.print(heightText);
-  tft.setCursor(20, 300);
-  tft.print(weightText);
+  tft.setCursor(20, 275); // 精靈結束於Y=220，屬性在Y=245，身高體重在Y=275
+  tft.print(statsText);
 
-  // 播放GIF動畫 (如果載入成功)
+  // 播放GIF動畫 (GIF-only mode)
   if (currentGIF.loaded)
   {
     playGIFFromMemory();
   }
   else
   {
-    // 降級到程式化動畫
-    playProgrammaticAnimation(currentPokemon.id);
+    Serial.printf("No GIF available for Pokemon #%d - showing border area only\n", currentPokemon.id);
+    // 顯示邊框區域以便調試
+    tft.drawRect(45, 70, 150, 150, ILI9341_RED);
+    tft.drawRect(46, 71, 148, 148, ILI9341_YELLOW);
   }
 }
 
@@ -1587,15 +1509,15 @@ void playGIFFromMemory()
 
     Serial.printf("GIF opened successfully: %dx%d\n", origWidth, origHeight);
 
-    // Calculate canvas position and dimensions (centered within 130x130 square)
+    // Calculate canvas position and dimensions (centered within 150x150 square)
     g_canvasWidth = origWidth;
     g_canvasHeight = origHeight;
-    
-    // 定義130x130正方形區域
-    int16_t squareX = 55;
-    int16_t squareY = 80;
-    int16_t squareSize = 130;
-    
+
+    // 定義150x150正方形區域
+    int16_t squareX = 45; // 居中: (240-150)/2 = 45
+    int16_t squareY = 70; // 與程式化動畫一致
+    int16_t squareSize = 150;
+
     // 將GIF居中在正方形內，而不是居中在整個螢幕上
     g_xOffset = squareX + (squareSize - origWidth) / 2;
     g_yOffset = squareY + (squareSize - origHeight) / 2;
@@ -1605,31 +1527,32 @@ void playGIFFromMemory()
     Serial.printf("Square area: X=%d, Y=%d, Size=%dx%d\n", squareX, squareY, squareSize, squareSize);
     Serial.printf("GIF dimensions: %dx%d\n", origWidth, origHeight);
     Serial.printf("Calculated GIF position: X=%d, Y=%d\n", g_xOffset, g_yOffset);
-    Serial.printf("GIF will be centered in square: %s\n", 
+    Serial.printf("GIF will be centered in square: %s\n",
                   (g_xOffset >= squareX && g_yOffset >= squareY) ? "YES" : "NO");
-    
+
     // 檢查GIF是否超出邊界
     int16_t gifRight = g_xOffset + origWidth;
     int16_t gifBottom = g_yOffset + origHeight;
     int16_t squareRight = squareX + squareSize;
     int16_t squareBottom = squareY + squareSize;
-    
-    Serial.printf("GIF bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n", 
+
+    Serial.printf("GIF bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n",
                   g_xOffset, gifRight, g_yOffset, gifBottom);
-    Serial.printf("Square bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n", 
+    Serial.printf("Square bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n",
                   squareX, squareRight, squareY, squareBottom);
-    
-    if (gifRight > squareRight || gifBottom > squareBottom || g_xOffset < squareX || g_yOffset < squareY) {
-        Serial.printf("WARNING: GIF extends beyond square boundaries!\n");
+
+    if (gifRight > squareRight || gifBottom > squareBottom || g_xOffset < squareX || g_yOffset < squareY)
+    {
+      Serial.printf("WARNING: GIF extends beyond square boundaries!\n");
     }
 
-    // 添加邊框以便調試 - 顯示130x130正方形區域
-    tft.drawRect(squareX, squareY, squareSize, squareSize, ILI9341_RED);        // 外邊框 (紅色)
-    tft.drawRect(squareX+1, squareY+1, squareSize-2, squareSize-2, ILI9341_YELLOW); // 內邊框 (黃色)
-    
+    // 添加邊框以便調試 - 顯示150x150正方形區域
+    tft.drawRect(squareX, squareY, squareSize, squareSize, ILI9341_RED);                    // 外邊框 (紅色)
+    tft.drawRect(squareX + 1, squareY + 1, squareSize - 2, squareSize - 2, ILI9341_YELLOW); // 內邊框 (黃色)
+
     // 添加GIF實際邊界框 (藍色)
     tft.drawRect(g_xOffset, g_yOffset, origWidth, origHeight, ILI9341_BLUE);
-    
+
     Serial.printf("DEBUG: Red/Yellow borders show intended square area\n");
     Serial.printf("DEBUG: Blue border shows actual GIF area\n");
 
@@ -1653,32 +1576,7 @@ void playGIFFromMemory()
   }
 }
 
-// 程式化動畫作為降級選項
-void playProgrammaticAnimation(int pokemon_id)
-{
-  Serial.printf("Playing programmatic animation for Pokemon #%d\n", pokemon_id);
-
-  // 在螢幕中央區域顯示簡單動畫 - 使用130x130正方形
-  int16_t areaX = 55;   // 居中: (240-130)/2 = 55
-  int16_t areaY = 80;   // 稍微上移以更好適配
-  int16_t areaWidth = 130;  // 正方形寬度
-  int16_t areaHeight = 130; // 正方形高度
-
-  // 詳細調試資訊
-  Serial.printf("=== PROGRAMMATIC ANIMATION DEBUG ===\n");
-  Serial.printf("Animation area: X=%d, Y=%d, Size=%dx%d\n", areaX, areaY, areaWidth, areaHeight);
-  Serial.printf("Expected sprite center: X=%d, Y=%d\n", 
-                areaX + areaWidth/2, areaY + areaHeight/2);
-  
-  // 添加邊框以便調試 - 顯示130x130正方形區域
-  tft.drawRect(areaX, areaY, areaWidth, areaHeight, ILI9341_RED);        // 外邊框 (紅色)
-  tft.drawRect(areaX+1, areaY+1, areaWidth-2, areaHeight-2, ILI9341_YELLOW); // 內邊框 (黃色)
-  
-  Serial.printf("DEBUG: Red/Yellow borders show animation area boundaries\n");
-
-  // 使用既有的精靈動畫函數
-  playEnhancedPokemonAnimation(pokemon_id, areaX, areaY, areaWidth, areaHeight, 3000);
-}
+// playProgrammaticAnimation function removed - using GIF-only mode
 
 // 完整的Pokemon頁面顯示函數 - 包含精靈動畫和增強過渡效果
 bool displayPokemonPage(int id)
@@ -1745,8 +1643,8 @@ bool displayPokemonPage(int id)
     return false;
   }
 
-  // Step 6: Play enhanced sprite animation with particle effects - 使用130x130正方形
-  playEnhancedPokemonAnimation(id, 55, 80, 130, 130, 3000);
+  // Step 6: Play enhanced sprite animation with particle effects - 使用150x150正方形
+  playEnhancedPokemonAnimation(id, 45, 70, 150, 150, 3000);
 
   Serial.printf("Pokemon #%d page displayed successfully with enhanced experience\n", id);
   return true;
@@ -1818,24 +1716,20 @@ bool displayPokemonInfoWithTransition(int id)
 
   // Chinese name display removed
 
-  // Stats with progress bar animation
+  // Stats display (height and weight on same line)
   tft.setTextSize(1);
   tft.setTextColor(ILI9341_WHITE);
 
-  // Height
-  tft.setCursor(20, 220);
-  tft.print("Height: ");
-  tft.print(currentPokemon.height / 10.0, 1);
-  tft.print(" m");
+  // 格式化為單行顯示: "Height: XX.X m     Weight: XX.X kg"
+  char statsLine[64];
+  snprintf(statsLine, sizeof(statsLine), "Height: %.1fm     Weight: %.1fkg",
+           currentPokemon.height / 10.0, currentPokemon.weight / 10.0);
 
-  // Weight
-  tft.setCursor(20, 235);
-  tft.print("Weight: ");
-  tft.print(currentPokemon.weight / 10.0, 1);
-  tft.print(" kg");
+  tft.setCursor(20, 250); // 精靈結束於Y=220，身高體重在Y=250 (30px間距)
+  tft.print(statsLine);
 
-  // Type badges with slide-in effect
-  int badgeY = 250;
+  // Type badges with slide-in effect (調整間距)
+  int badgeY = 275; // 身高體重在Y=250，屬性在Y=275 (25px間距)
   int badgeWidth = 60;
   int badgeHeight = 20;
   int badgeSpacing = 10;
