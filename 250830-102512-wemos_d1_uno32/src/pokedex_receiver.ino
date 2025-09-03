@@ -37,28 +37,7 @@
 // Embedded Pokemon data removed - now using SD card JSON files only
 // (Previous embedded data was for testing only)
 
-// 簡化的動畫系統 - 使用精靈動畫替代GIF
-struct PokemonSprite
-{
-  int id;
-  uint16_t color1; // 主要顏色
-  uint16_t color2; // 次要顏色
-  uint16_t color3; // 細節顏色
-};
-
-// 嵌入式精靈資料 (簡化的Pokemon顏色)
-const PokemonSprite PROGMEM pokemon_sprites[] = {
-    {1, 0x07E0, 0x8010, ILI9341_BLACK},               // Bulbasaur: Green, Purple, Black
-    {4, ILI9341_RED, ILI9341_ORANGE, ILI9341_BLACK},  // Charmander: Red, Orange, Black
-    {6, ILI9341_RED, ILI9341_ORANGE, ILI9341_BLUE},   // Charizard: Red, Orange, Blue
-    {7, 0x047F, 0x07FF, ILI9341_BLACK},               // Squirtle: Blue, Cyan, Black
-    {25, ILI9341_YELLOW, ILI9341_RED, ILI9341_BLACK}, // Pikachu: Yellow, Red, Black
-    {94, 0x4210, 0x8010, ILI9341_RED},                // Gengar: Dark Purple, Purple, Red
-    {150, 0x7BEF, 0x8010, ILI9341_WHITE},             // Mewtwo: Gray, Purple, White
-    {151, 0xFBDF, 0xFFE0, ILI9341_BLUE}               // Mew: Pink, Yellow, Blue
-};
-
-const int POKEMON_SPRITES_SIZE = sizeof(pokemon_sprites) / sizeof(PokemonSprite);
+// Test sprite data removed - using GIF-only mode
 
 // 動態Pokemon資料結構 (從SD卡載入)
 struct DynamicPokemonData
@@ -137,20 +116,7 @@ int16_t g_canvasHeight = 0;
 // Pokemon data lookup removed - now using currentPokemon loaded from SD card JSON
 // All Pokemon data access goes through loadAndDisplayPokemon() -> currentPokemon
 
-// 查找精靈顏色資料
-const PokemonSprite *findPokemonSprite(int id)
-{
-  for (int i = 0; i < POKEMON_SPRITES_SIZE; i++)
-  {
-    PokemonSprite sprite;
-    memcpy_P(&sprite, &pokemon_sprites[i], sizeof(PokemonSprite));
-    if (sprite.id == id)
-    {
-      return &pokemon_sprites[i];
-    }
-  }
-  return NULL;
-}
+// findPokemonSprite function removed - using GIF-only mode
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 
@@ -699,145 +665,13 @@ void drawEllipse(int16_t centerX, int16_t centerY, int16_t width, int16_t height
 // Enhanced Pokemon animation with particle effects and sparkles
 void playEnhancedPokemonAnimation(int id, int16_t areaX, int16_t areaY, int16_t areaWidth, int16_t areaHeight, int duration_ms = 3000)
 {
-  const PokemonSprite *sprite = findPokemonSprite(id);
-  if (!sprite)
-  {
-    Serial.printf("No sprite data for Pokemon ID %d, GIF-only mode\n", id);
-    return;
-  }
-
-  // 從PROGMEM讀取精靈資料
-  PokemonSprite spriteData;
-  memcpy_P(&spriteData, sprite, sizeof(PokemonSprite));
-
-  Serial.printf("Playing enhanced animation for Pokemon #%d\n", id);
-
-  // 計算精靈大小和位置 - 使用更大的比例填滿150x150區域
-  int16_t spriteSize = min(areaWidth, areaHeight) / 1.2; // 改為除以1.2，讓精靈更大 (150/1.2=125px)
-  int16_t spriteX = areaX + areaWidth / 2;
-  int16_t spriteY = areaY + areaHeight / 2;
-
-  // 詳細調試資訊
-  Serial.printf("=== SPRITE ANIMATION DEBUG ===\n");
-  Serial.printf("Area bounds: X=%d, Y=%d, W=%d, H=%d\n", areaX, areaY, areaWidth, areaHeight);
-  Serial.printf("Calculated sprite: Center=(%d,%d), Size=%d\n", spriteX, spriteY, spriteSize);
-  Serial.printf("Sprite bounds: Left=%d, Right=%d, Top=%d, Bottom=%d\n",
-                spriteX - spriteSize, spriteX + spriteSize, spriteY - spriteSize, spriteY + spriteSize);
-
-  // 檢查精靈是否超出區域邊界
-  if (spriteX - spriteSize < areaX || spriteX + spriteSize > areaX + areaWidth ||
-      spriteY - spriteSize < areaY || spriteY + spriteSize > areaY + areaHeight)
-  {
-    Serial.printf("WARNING: Sprite extends beyond area boundaries!\n");
-    Serial.printf("Consider reducing sprite size to fit within bounds\n");
-  }
-
-  // Particle system for sparkle effects
-  struct Particle
-  {
-    int16_t x, y;
-    int16_t vx, vy;
-    uint16_t color;
-    int life;
-  };
-
-  const int MAX_PARTICLES = 8;
-  Particle particles[MAX_PARTICLES];
-
-  // Initialize particles
-  for (int i = 0; i < MAX_PARTICLES; i++)
-  {
-    particles[i].life = 0;
-  }
-
-  unsigned long startTime = millis();
-  int frame = 0;
-
-  while (millis() - startTime < duration_ms)
-  {
-    // 清除動畫區域
-    tft.fillRect(areaX, areaY, areaWidth, areaHeight, ILI9341_BLACK);
-
-    // Add sparkle particles periodically
-    if (frame % 8 == 0)
-    {
-      for (int i = 0; i < MAX_PARTICLES; i++)
-      {
-        if (particles[i].life <= 0)
-        {
-          particles[i].x = spriteX + random(-spriteSize, spriteSize);
-          particles[i].y = spriteY + random(-spriteSize, spriteSize);
-          particles[i].vx = random(-3, 3);
-          particles[i].vy = random(-3, 3);
-          particles[i].color = (random(0, 3) == 0) ? ILI9341_YELLOW : (random(0, 2) == 0) ? ILI9341_CYAN
-                                                                                          : ILI9341_WHITE;
-          particles[i].life = 20 + random(0, 20);
-          break;
-        }
-      }
-    }
-
-    // Update and draw particles
-    for (int i = 0; i < MAX_PARTICLES; i++)
-    {
-      if (particles[i].life > 0)
-      {
-        particles[i].x += particles[i].vx;
-        particles[i].y += particles[i].vy;
-        particles[i].life--;
-
-        // Fade effect
-        if (particles[i].life > 10)
-        {
-          tft.drawPixel(particles[i].x, particles[i].y, particles[i].color);
-          tft.drawPixel(particles[i].x + 1, particles[i].y, particles[i].color);
-          tft.drawPixel(particles[i].x, particles[i].y + 1, particles[i].color);
-        }
-        else if (particles[i].life > 5)
-        {
-          tft.drawPixel(particles[i].x, particles[i].y, particles[i].color);
-        }
-      }
-    }
-
-    // Programmatic sprite drawing removed - GIF-only mode
-    // Just show the border area for debugging
-
-    // Add glow effect around sprite every few frames
-    if (frame % 15 == 0)
-    {
-      for (int r = spriteSize + 5; r < spriteSize + 15; r += 2)
-      {
-        tft.drawCircle(spriteX, spriteY, r, spriteData.color1);
-        delay(30);
-        tft.drawCircle(spriteX, spriteY, r, ILI9341_BLACK);
-      }
-    }
-
-    // 更新幀計數器
-    frame++;
-
-    // 控制動畫速度 (約12 FPS for smoother effects)
-    delay(80);
-
-    // 餵看門狗
-    esp_task_wdt_reset();
-  }
-
-  // Final sparkle burst
-  for (int burst = 0; burst < 20; burst++)
-  {
-    int16_t sparkleX = spriteX + random(-spriteSize * 2, spriteSize * 2);
-    int16_t sparkleY = spriteY + random(-spriteSize * 2, spriteSize * 2);
-    uint16_t sparkleColor = (random(0, 3) == 0) ? ILI9341_YELLOW : (random(0, 2) == 0) ? ILI9341_CYAN
-                                                                                       : ILI9341_WHITE;
-
-    tft.fillCircle(sparkleX, sparkleY, 2, sparkleColor);
-    delay(50);
-    tft.fillCircle(sparkleX, sparkleY, 2, ILI9341_BLACK);
-  }
-
-  Serial.printf("Enhanced animation completed for Pokemon #%d\n", id);
+  Serial.printf("GIF-only mode: No programmatic animation for Pokemon #%d\n", id);
+  
+  // Just show the border area for debugging in GIF-only mode
+  tft.drawRect(areaX, areaY, areaWidth, areaHeight, ILI9341_RED);
+  tft.drawRect(areaX + 1, areaY + 1, areaWidth - 2, areaHeight - 2, ILI9341_YELLOW);
+  
+  Serial.printf("Showing 150x150 border area at X=%d, Y=%d for GIF placeholder\n", areaX, areaY);
 }
 
 // 簡化的顯示器管理 - 無需SPI競爭（只有TFT）
