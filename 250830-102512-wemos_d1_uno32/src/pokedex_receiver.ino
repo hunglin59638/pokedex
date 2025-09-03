@@ -34,30 +34,8 @@
 // 定義SD卡引腳 (重新啟用)
 #define SD_CS 14 // SD卡片選引腳
 
-// 嵌入式Pokemon資料結構
-struct PokemonData
-{
-  int id;
-  const char *name_en;
-  const char *name_zh;
-  const char *type1;
-  const char *type2; // NULL if single type
-  int height;        // in decimeters
-  int weight;        // in hectograms
-};
-
-// 嵌入在程式記憶體中的Pokemon資料 (PROGMEM)
-const PokemonData PROGMEM pokemon_database[] = {
-    {1, "Bulbasaur", "妙蛙種子", "grass", "poison", 7, 69},
-    {4, "Charmander", "小火龍", "fire", NULL, 6, 85},
-    {6, "Charizard", "噴火龍", "fire", "flying", 17, 905},
-    {7, "Squirtle", "傑尼龜", "water", NULL, 5, 90},
-    {25, "Pikachu", "皮卡丘", "electric", NULL, 4, 60},
-    {94, "Gengar", "耿鬼", "ghost", "poison", 15, 405},
-    {150, "Mewtwo", "超夢", "psychic", NULL, 20, 1220},
-    {151, "Mew", "夢幻", "psychic", NULL, 4, 40}};
-
-const int POKEMON_DATABASE_SIZE = sizeof(pokemon_database) / sizeof(PokemonData);
+// Embedded Pokemon data removed - now using SD card JSON files only
+// (Previous embedded data was for testing only)
 
 // 簡化的動畫系統 - 使用精靈動畫替代GIF
 struct PokemonSprite
@@ -156,20 +134,8 @@ int16_t g_yOffset = 0;
 int16_t g_canvasWidth = 0;
 int16_t g_canvasHeight = 0;
 
-// 查找Pokemon資料的函數
-const PokemonData *findPokemonData(int id)
-{
-  for (int i = 0; i < POKEMON_DATABASE_SIZE; i++)
-  {
-    PokemonData data;
-    memcpy_P(&data, &pokemon_database[i], sizeof(PokemonData));
-    if (data.id == id)
-    {
-      return &pokemon_database[i];
-    }
-  }
-  return NULL; // 找不到
-}
+// Pokemon data lookup removed - now using currentPokemon loaded from SD card JSON
+// All Pokemon data access goes through loadAndDisplayPokemon() -> currentPokemon
 
 // 查找精靈顏色資料
 const PokemonSprite *findPokemonSprite(int id)
@@ -502,6 +468,10 @@ bool loadPokemonJSON(int pokemon_id)
   }
   jsonFile.close();
 
+  Serial.printf("DEBUG: Raw JSON content for Pokemon #%d:\n", pokemon_id);
+  Serial.println(jsonContent);
+  Serial.println("DEBUG: End of JSON content");
+
   // 解析JSON
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, jsonContent);
@@ -512,12 +482,12 @@ bool loadPokemonJSON(int pokemon_id)
     return false;
   }
 
-  // 提取Pokemon資料
+  // 提取Pokemon資料 - 匹配實際JSON結構
   currentPokemon.id = pokemon_id;
-  currentPokemon.name_en = doc["name"]["english"].as<String>();
-  currentPokemon.name_zh = doc["name"]["chinese"].as<String>();
+  currentPokemon.name_en = doc["names"]["en"].as<String>();
+  // Chinese name removed - not needed
 
-  JsonArray types = doc["type"];
+  JsonArray types = doc["types"];
   if (types.size() > 0)
   {
     currentPokemon.type1 = types[0].as<String>();
@@ -531,13 +501,18 @@ bool loadPokemonJSON(int pokemon_id)
     currentPokemon.type2 = "";
   }
 
-  currentPokemon.height = doc["base"]["Height"].as<int>();
-  currentPokemon.weight = doc["base"]["Weight"].as<int>();
+  currentPokemon.height = doc["height"].as<int>();
+  currentPokemon.weight = doc["weight"].as<int>();
   currentPokemon.loaded = true;
 
-  Serial.printf("Loaded Pokemon JSON: %s (%s)\n",
-                currentPokemon.name_en.c_str(),
-                currentPokemon.name_zh.c_str());
+  Serial.printf("DEBUG: Pokemon JSON loaded successfully!\n");
+  Serial.printf("  ID: %d\n", currentPokemon.id);
+  Serial.printf("  Name EN: '%s'\n", currentPokemon.name_en.c_str());
+  // Chinese name debug removed
+  Serial.printf("  Type1: '%s'\n", currentPokemon.type1.c_str());
+  Serial.printf("  Type2: '%s'\n", currentPokemon.type2.c_str());
+  Serial.printf("  Height: %d, Weight: %d\n", currentPokemon.height, currentPokemon.weight);
+  Serial.printf("  Loaded: %s\n", currentPokemon.loaded ? "true" : "false");
 
   return true;
 }
@@ -1159,9 +1134,7 @@ void displayPokemonBallWelcome()
     tft.fillRect(10, 240, 220, 16, ILI9341_BLACK);
     tft.setTextColor(colors[c]);
     tft.setCursor(10, 240);
-    tft.print("Embedded Data: ");
-    tft.print(POKEMON_DATABASE_SIZE);
-    tft.print(" Pokemon Ready!");
+    tft.print("SD Card Data Ready!");
     delay(300);
   }
 
@@ -1181,10 +1154,10 @@ void displayPokemonBallWelcome()
   Serial.println("Enhanced Pokemon Ball welcome screen displayed");
 }
 
-// 全新的無SD卡Pokemon資訊顯示函數 - 使用嵌入式資料
+// Pokemon資訊顯示函數 - 使用SD卡載入的currentPokemon資料
 bool displayPokemonInfo(int id)
 {
-  Serial.printf("Displaying Pokemon info for ID %d (embedded data)\n", id);
+  Serial.printf("Displaying Pokemon info for ID %d (from SD card data)\n", id);
 
   if (!checkMemoryAvailable("displayPokemonInfo"))
   {
@@ -1198,20 +1171,16 @@ bool displayPokemonInfo(int id)
     return false;
   }
 
-  // 從嵌入式資料庫查找Pokemon
-  const PokemonData *pokemon = findPokemonData(id);
-  if (!pokemon)
+  // 檢查currentPokemon是否已載入且ID匹配
+  if (!currentPokemon.loaded || currentPokemon.id != id)
   {
-    Serial.printf("Pokemon ID %d not found in embedded database\n", id);
+    Serial.printf("Pokemon ID %d not loaded from SD card (currentPokemon.loaded=%s, currentPokemon.id=%d)\n",
+                  id, currentPokemon.loaded ? "true" : "false", currentPokemon.id);
     releaseDisplay("displayPokemonInfo");
     return false;
   }
 
-  // 從PROGMEM讀取資料
-  PokemonData data;
-  memcpy_P(&data, pokemon, sizeof(PokemonData));
-
-  Serial.printf("Found Pokemon: %s (ID: %d)\n", data.name_en, data.id);
+  Serial.printf("Found Pokemon: %s (ID: %d)\n", currentPokemon.name_en.c_str(), currentPokemon.id);
 
   // 無需SPI競爭 - 只有TFT使用SPI
   Serial.println("Starting TFT display (no SD conflicts!)");
@@ -1223,28 +1192,24 @@ bool displayPokemonInfo(int id)
   // Display Pokemon ID (centered at top)
   tft.setTextSize(2);
   char idText[16];
-  snprintf(idText, sizeof(idText), "#%d", data.id);
+  snprintf(idText, sizeof(idText), "#%d", currentPokemon.id);
 
   int16_t idX = (tft.width() - strlen(idText) * 12) / 2;
   tft.setCursor(idX, 20);
   tft.print(idText);
 
   // Display Pokemon name (English)
-  int16_t nameX = (tft.width() - strlen(data.name_en) * 12) / 2;
+  int16_t nameX = (tft.width() - currentPokemon.name_en.length() * 12) / 2;
   tft.setCursor(nameX, 40);
-  tft.print(data.name_en);
+  tft.print(currentPokemon.name_en);
 
-  // Display Chinese name (smaller)
-  tft.setTextSize(1);
-  int16_t nameZhX = (tft.width() - strlen(data.name_zh) * 6) / 2;
-  tft.setCursor(nameZhX, 65);
-  tft.print(data.name_zh);
+  // Chinese name display removed
 
   // Display height and weight
   tft.setTextSize(1);
 
   // Height (left side)
-  float height = data.height / 10.0; // Convert decimeters to meters
+  float height = currentPokemon.height / 10.0; // Convert decimeters to meters
   char heightLabel[] = "Height:";
   char heightValue[16];
   snprintf(heightValue, sizeof(heightValue), "%.1f m", height);
@@ -1258,7 +1223,7 @@ bool displayPokemonInfo(int id)
   tft.print(heightValue);
 
   // Weight (right side)
-  float weight = data.weight / 10.0; // Convert hectograms to kg
+  float weight = currentPokemon.weight / 10.0; // Convert hectograms to kg
   char weightLabel[] = "Weight:";
   char weightValue[16];
   snprintf(weightValue, sizeof(weightValue), "%.1f kg", weight);
@@ -1277,29 +1242,29 @@ bool displayPokemonInfo(int id)
   int badgeHeight = 20;
   int badgeSpacing = 10;
 
-  if (data.type2)
+  if (currentPokemon.type2.length() > 0)
   {
     // Two types
     int totalWidth = 2 * badgeWidth + badgeSpacing;
     int startX = (tft.width() - totalWidth) / 2;
 
-    uint16_t type1Color = getTypeColor(data.type1);
-    uint16_t type2Color = getTypeColor(data.type2);
+    uint16_t type1Color = getTypeColor(currentPokemon.type1.c_str());
+    uint16_t type2Color = getTypeColor(currentPokemon.type2.c_str());
 
-    drawTypeBadge(startX, badgeY, badgeWidth, badgeHeight, data.type1, type1Color);
-    drawTypeBadge(startX + badgeWidth + badgeSpacing, badgeY, badgeWidth, badgeHeight, data.type2, type2Color);
+    drawTypeBadge(startX, badgeY, badgeWidth, badgeHeight, currentPokemon.type1.c_str(), type1Color);
+    drawTypeBadge(startX + badgeWidth + badgeSpacing, badgeY, badgeWidth, badgeHeight, currentPokemon.type2.c_str(), type2Color);
   }
   else
   {
     // Single type
     int startX = (tft.width() - badgeWidth) / 2;
-    uint16_t typeColor = getTypeColor(data.type1);
-    drawTypeBadge(startX, badgeY, badgeWidth, badgeHeight, data.type1, typeColor);
+    uint16_t typeColor = getTypeColor(currentPokemon.type1.c_str());
+    drawTypeBadge(startX, badgeY, badgeWidth, badgeHeight, currentPokemon.type1.c_str(), typeColor);
   }
 
   releaseDisplay("displayPokemonInfo");
 
-  Serial.println("Pokemon info displayed successfully (no SD card needed!)");
+  Serial.println("Pokemon info displayed successfully (from SD card data)");
   return true;
 }
 
@@ -1438,6 +1403,8 @@ bool loadAndDisplayPokemon(int pokemon_id)
     changeSystemState(DISPLAYING, "Data loaded successfully");
 
     // 顯示Pokemon資訊和動畫
+    Serial.printf("DEBUG: About to call displayDynamicPokemonData. currentPokemon.loaded=%s, currentPokemon.id=%d\n",
+                  currentPokemon.loaded ? "true" : "false", currentPokemon.id);
     displayDynamicPokemonData();
 
     // 顯示5秒後回到監聽狀態
@@ -1482,11 +1449,7 @@ void displayDynamicPokemonData()
   tft.setCursor(nameX, 45);
   tft.print(currentPokemon.name_en);
 
-  // 顯示中文名稱
-  tft.setTextSize(1);
-  int16_t nameZhX = (tft.width() - currentPokemon.name_zh.length() * 6) / 2;
-  tft.setCursor(nameZhX, 70);
-  tft.print(currentPokemon.name_zh);
+  // Chinese name display removed
 
   // 顯示屬性標籤
   int badgeY = 250;
@@ -1564,7 +1527,7 @@ void GIFDraw(GIFDRAW *pDraw)
   int gif_y_offset = g_yOffset;
 
   s = pDraw->pPixels;
-  
+
   // Convert and handle transparency properly - replace transparent pixels with black
   for (x = 0; x < iWidth; x++)
   {
@@ -1579,10 +1542,10 @@ void GIFDraw(GIFDRAW *pDraw)
     {
       color = usPalette[idx];
     }
-    
+
     usTemp[x] = color;
   }
-  
+
   // Draw the converted line to TFT
   tft.startWrite();
   tft.setAddrWindow(gif_x_offset, gif_y_offset + y, iWidth, 1);
@@ -1607,16 +1570,16 @@ void playGIFFromMemory()
     // Get GIF dimensions and calculate canvas area for frame clearing
     int16_t origWidth = gif.getCanvasWidth();
     int16_t origHeight = gif.getCanvasHeight();
-    
+
     Serial.printf("GIF opened successfully: %dx%d\n", origWidth, origHeight);
-    
+
     // Calculate canvas position and dimensions (same logic as current GIFDraw positioning)
     g_canvasWidth = origWidth;
     g_canvasHeight = origHeight;
     g_xOffset = (tft.width() - origWidth) / 2;
     g_yOffset = 90; // 在Pokemon資訊下方 (matches current gif_y_offset)
-    
-    Serial.printf("GIF canvas area: %dx%d at offset (%d,%d)\n", 
+
+    Serial.printf("GIF canvas area: %dx%d at offset (%d,%d)\n",
                   g_canvasWidth, g_canvasHeight, g_xOffset, g_yOffset);
 
     // 播放3秒的動畫
@@ -1687,12 +1650,9 @@ bool displayPokemonPage(int id)
   // Step 4: Reveal Pokemon with slide-in effect
   tft.fillScreen(ILI9341_BLACK);
 
-  // Get Pokemon data for enhanced display
-  const PokemonData *pokemon = findPokemonData(id);
-  if (pokemon)
+  // Check if Pokemon data is loaded from SD card
+  if (currentPokemon.loaded && currentPokemon.id == id)
   {
-    PokemonData data;
-    memcpy_P(&data, pokemon, sizeof(PokemonData));
 
     // Show "Pokemon Found!" message
     tft.setTextColor(ILI9341_GREEN);
@@ -1739,15 +1699,14 @@ bool displayPokemonInfoWithTransition(int id)
     return false;
   }
 
-  const PokemonData *pokemon = findPokemonData(id);
-  if (!pokemon)
+  // 檢查currentPokemon是否已載入且ID匹配
+  if (!currentPokemon.loaded || currentPokemon.id != id)
   {
+    Serial.printf("Pokemon ID %d not loaded from SD card (currentPokemon.loaded=%s, currentPokemon.id=%d)\n",
+                  id, currentPokemon.loaded ? "true" : "false", currentPokemon.id);
     releaseDisplay("displayPokemonInfoWithTransition");
     return false;
   }
-
-  PokemonData data;
-  memcpy_P(&data, pokemon, sizeof(PokemonData));
 
   // Clear screen with gradient effect
   tft.fillScreen(ILI9341_BLACK);
@@ -1771,7 +1730,7 @@ bool displayPokemonInfoWithTransition(int id)
     tft.setTextSize(2);
     tft.setTextColor(ILI9341_WHITE);
     char idText[16];
-    snprintf(idText, sizeof(idText), "#%d", data.id);
+    snprintf(idText, sizeof(idText), "#%d", currentPokemon.id);
     tft.setCursor(currentX, 50);
     tft.print(idText);
 
@@ -1785,20 +1744,16 @@ bool displayPokemonInfoWithTransition(int id)
   int16_t nameX = 20;
   int16_t nameY = 80;
 
-  for (int i = 0; i < strlen(data.name_en); i++)
+  for (int i = 0; i < currentPokemon.name_en.length(); i++)
   {
     tft.setCursor(nameX + i * 12, nameY);
-    tft.print(data.name_en[i]);
+    tft.print(currentPokemon.name_en.charAt(i));
     delay(60);
   }
 
   delay(200);
 
-  // Chinese name
-  tft.setTextSize(1);
-  tft.setTextColor(ILI9341_YELLOW);
-  tft.setCursor(nameX, nameY + 25);
-  tft.print(data.name_zh);
+  // Chinese name display removed
 
   // Stats with progress bar animation
   tft.setTextSize(1);
@@ -1807,13 +1762,13 @@ bool displayPokemonInfoWithTransition(int id)
   // Height
   tft.setCursor(20, 220);
   tft.print("Height: ");
-  tft.print(data.height / 10.0, 1);
+  tft.print(currentPokemon.height / 10.0, 1);
   tft.print(" m");
 
   // Weight
   tft.setCursor(20, 235);
   tft.print("Weight: ");
-  tft.print(data.weight / 10.0, 1);
+  tft.print(currentPokemon.weight / 10.0, 1);
   tft.print(" kg");
 
   // Type badges with slide-in effect
@@ -1822,45 +1777,45 @@ bool displayPokemonInfoWithTransition(int id)
   int badgeHeight = 20;
   int badgeSpacing = 10;
 
-  if (data.type2)
+  if (currentPokemon.type2.length() > 0)
   {
     // Two types with staggered animation
     int totalWidth = 2 * badgeWidth + badgeSpacing;
     int startX = (tft.width() - totalWidth) / 2;
 
     // First type
-    uint16_t type1Color = getTypeColor(data.type1);
+    uint16_t type1Color = getTypeColor(currentPokemon.type1.c_str());
     for (int w = 0; w <= badgeWidth; w += 5)
     {
       tft.fillRect(startX + badgeWidth - w, badgeY, w, badgeHeight, type1Color);
       delay(20);
     }
-    drawTypeBadge(startX, badgeY, badgeWidth, badgeHeight, data.type1, type1Color);
+    drawTypeBadge(startX, badgeY, badgeWidth, badgeHeight, currentPokemon.type1.c_str(), type1Color);
 
     delay(200);
 
     // Second type
-    uint16_t type2Color = getTypeColor(data.type2);
+    uint16_t type2Color = getTypeColor(currentPokemon.type2.c_str());
     int type2X = startX + badgeWidth + badgeSpacing;
     for (int w = 0; w <= badgeWidth; w += 5)
     {
       tft.fillRect(type2X, badgeY, w, badgeHeight, type2Color);
       delay(20);
     }
-    drawTypeBadge(type2X, badgeY, badgeWidth, badgeHeight, data.type2, type2Color);
+    drawTypeBadge(type2X, badgeY, badgeWidth, badgeHeight, currentPokemon.type2.c_str(), type2Color);
   }
   else
   {
     // Single type
     int startX = (tft.width() - badgeWidth) / 2;
-    uint16_t typeColor = getTypeColor(data.type1);
+    uint16_t typeColor = getTypeColor(currentPokemon.type1.c_str());
 
     for (int w = 0; w <= badgeWidth; w += 5)
     {
       tft.fillRect(startX + badgeWidth - w, badgeY, w, badgeHeight, typeColor);
       delay(20);
     }
-    drawTypeBadge(startX, badgeY, badgeWidth, badgeHeight, data.type1, typeColor);
+    drawTypeBadge(startX, badgeY, badgeWidth, badgeHeight, currentPokemon.type1.c_str(), typeColor);
   }
 
   releaseDisplay("displayPokemonInfoWithTransition");
