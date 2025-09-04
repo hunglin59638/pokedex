@@ -14,7 +14,9 @@ os.makedirs(POKEMON_DIR, exist_ok=True)
 
 def make_session():
     s = requests.Session()
-    retries = Retry(total=5, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+    retries = Retry(
+        total=5, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504]
+    )
     adapter = HTTPAdapter(max_retries=retries)
     s.mount("https://", adapter)
     s.mount("http://", adapter)
@@ -57,7 +59,9 @@ def find_sprite_urls(data):
 
     # Prefer generation-v animated gif
     try:
-        gif = sprites["versions"]["generation-v"]["black-white"]["animated"]["front_default"]
+        gif = sprites["versions"]["generation-v"]["black-white"]["animated"][
+            "front_default"
+        ]
     except Exception:
         gif = None
 
@@ -128,16 +132,22 @@ def fetch_pokemon_data(session, pokemon_url, skip_existing=True):
             with open(png_path, "wb") as f:
                 f.write(presp.content)
         else:
-            print(f"Failed to download PNG for {pokemon_id} ({pokemon_info.get('name')}) - URL: {png_url}")
+            print(
+                f"Failed to download PNG for {pokemon_id} ({pokemon_info.get('name')}) - URL: {png_url}"
+            )
 
     if gif_url:
         gresp = session.get(gif_url)
         if gresp.status_code == 200:
             with open(gif_path, "wb") as f:
                 f.write(gresp.content)
-            print(f"Downloaded data and GIF for {pokemon_id} ({pokemon_info.get('name')})")
+            print(
+                f"Downloaded data and GIF for {pokemon_id} ({pokemon_info.get('name')})"
+            )
         else:
-            print(f"Failed to download GIF for {pokemon_id} ({pokemon_info.get('name')}) - URL: {gif_url}")
+            print(
+                f"Failed to download GIF for {pokemon_id} ({pokemon_info.get('name')}) - URL: {gif_url}"
+            )
     else:
         print(f"No animated GIF for {pokemon_id} ({pokemon_info.get('name')})")
 
@@ -161,9 +171,23 @@ def get_all_pokemon_list(session):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=0, help="Limit number of pokemon to fetch (for testing)")
-    parser.add_argument("--start", type=int, default=0, help="Start index in the full pokemon list (0-based)")
-    parser.add_argument("--skip-existing", action="store_true", help="Skip entries with existing JSON files")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Limit number of pokemon to fetch (for testing)",
+    )
+    parser.add_argument(
+        "--start",
+        type=int,
+        default=0,
+        help="Start index in the full pokemon list (0-based)",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip entries with existing JSON files",
+    )
     args = parser.parse_args()
 
     session = make_session()
