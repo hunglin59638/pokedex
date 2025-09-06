@@ -169,6 +169,11 @@ volatile int requestedPokemonId = 0;
 volatile unsigned long lastHeartbeat = 0;
 volatile bool systemHealthy = true;
 volatile int consecutiveErrors = 0;
+
+// Continuous flashing control variables
+bool shouldFlash = false;
+unsigned long lastFlashTime = 0;
+bool flashState = false;
 #define MAX_CONSECUTIVE_ERRORS 3
 
 // 狀態轉換和安全檢查函數
@@ -586,8 +591,20 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
   {
     memcpy(&receivedData, incomingData, sizeof(receivedData));
     requestedPokemonId = receivedData.pokemon_id;
-    pokemonDisplayRequested = true;
-    newDataReceived = true;
+
+    // Handle Pokemon ID 0 as special "home" command
+    if (requestedPokemonId == 0)
+    {
+      // Set flag for home command instead of regular Pokemon display
+      pokemonDisplayRequested = false; // Don't use regular display flow
+      newDataReceived = true;          // Use this flag to trigger home action
+    }
+    else
+    {
+      // Regular Pokemon display request
+      pokemonDisplayRequested = true;
+      newDataReceived = true;
+    }
   }
 
   // 避免在中斷中進行Serial輸出
@@ -841,30 +858,13 @@ void transitionFromWelcomeScreen()
   Serial.println("Transition completed");
 }
 
-// Enhanced Pokemon Ball welcome screen with pulsing animation
+// Simplified Pokemon Ball welcome screen
 void displayPokemonBallWelcome()
 {
   Serial.println("Displaying Pokemon Ball welcome screen");
 
   // Clear screen with black background
   tft.fillScreen(ILI9341_BLACK);
-
-  // Title text with fade-in effect
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  int16_t titleY = 30;
-  String title = "POKEDEX";
-  int16_t titleX = (tft.width() - title.length() * 12) / 2;
-
-  // Fade in title character by character
-  for (int i = 0; i < title.length(); i++)
-  {
-    tft.setCursor(titleX + i * 12, titleY);
-    tft.print(title.charAt(i));
-    delay(100);
-  }
-
-  delay(300);
 
   // Draw Pokemon Ball with animation
   int16_t ballCenterX = tft.width() / 2;
@@ -879,146 +879,194 @@ void displayPokemonBallWelcome()
     esp_task_wdt_reset();
   }
 
-  // Subtitle with typewriter effect
-  tft.setTextSize(1);
-  int16_t subtitleY = 210;
-  String subtitle = "NFC Pokemon Scanner";
-  int16_t subtitleX = (tft.width() - subtitle.length() * 6) / 2;
+  Serial.println("Static Pokemon Ball welcome screen displayed");
+}
 
-  for (int i = 0; i < subtitle.length(); i++)
+// Show ready-to-scan state with flashing pokeball and white text
+void showReadyToScanState()
+{
+  Serial.println("Activating ready-to-scan state");
+
+  // Display white "SCAN A POKEMON" text (no flashing)
+  tft.setTextSize(2);
+  tft.setTextColor(ILI9341_WHITE);
+  int16_t textY = 250;
+  String scanText = "SCAN A POKEMON";
+  int16_t textX = (tft.width() - scanText.length() * 12) / 2;
+
+  tft.setCursor(textX, textY);
+  tft.print(scanText);
+
+  // Get pokeball center and radius for flashing effect
+  int16_t ballCenterX = tft.width() / 2;
+  int16_t ballCenterY = 120;
+  int16_t ballRadius = 60;
+
+  // Start continuous flashing effect around pokeball
+  for (int pulse = 0; pulse < 6; pulse++)
   {
-    tft.setCursor(subtitleX + i * 6, subtitleY);
-    tft.print(subtitle.charAt(i));
-    delay(80);
-  }
-
-  // System info with color animation
-  tft.setTextSize(1);
-  tft.setCursor(10, 240);
-
-  // Cycle through colors for system info
-  uint16_t colors[] = {ILI9341_CYAN, ILI9341_GREEN, ILI9341_YELLOW};
-  for (int c = 0; c < 3; c++)
-  {
-    tft.fillRect(10, 240, 220, 16, ILI9341_BLACK);
-    tft.setTextColor(colors[c]);
-    tft.setCursor(10, 240);
-    tft.print("SD Card Data Ready!");
-    delay(300);
-  }
-
-  // Final pulsing effect on Pokemon Ball
-  for (int pulse = 0; pulse < 3; pulse++)
-  {
-    // Brighten
+    // Brighten with yellow glow
     tft.drawCircle(ballCenterX, ballCenterY, ballRadius + 2, ILI9341_YELLOW);
-    delay(200);
+    tft.drawCircle(ballCenterX, ballCenterY, ballRadius + 4, ILI9341_YELLOW);
+    delay(300);
 
-    // Return to normal
+    // Clear glow
     tft.drawCircle(ballCenterX, ballCenterY, ballRadius + 2, ILI9341_BLACK);
-    delay(200);
+    tft.drawCircle(ballCenterX, ballCenterY, ballRadius + 4, ILI9341_BLACK);
+    delay(300);
     esp_task_wdt_reset();
   }
 
-  Serial.println("Enhanced Pokemon Ball welcome screen displayed");
+  Serial.println("Ready-to-scan state activated - NFC scanning available");
+
+  // Enable continuous flashing after initial display
+  shouldFlash = true;
+  lastFlashTime = millis();
+  flashState = false;
+}
+
+// Clean return to welcome screen function (for Pokemon ID 0 "home button")
+void returnToWelcomeScreen()
+{
+  Serial.println("Returning to welcome screen (Pokemon ID 0 home command)");
+
+  // Stop any ongoing GIF playback
+  if (currentGIF.loaded)
+  {
+    gif.close();
+  }
+
+  // Clear Pokemon data and GIF memory
+  currentPokemon.loaded = false;
+  currentPokemon.id = -1;
+  currentPokemon.name_en = "";
+  currentPokemon.name_zh = "";
+  currentPokemon.type1 = "";
+  currentPokemon.type2 = "";
+  currentPokemon.height = 0;
+  currentPokemon.weight = 0;
+
+  // Clear GIF buffer
+  currentGIF.clear();
+
+  // Reset display flags
+  displayBusy = false;
+  pokemonDisplayRequested = false;
+  newDataReceived = false;
+
+  // Display the simplified Pokemon Ball welcome screen
+  displayPokemonBallWelcome();
+
+  // Since ESP-NOW is already working (we received Pokemon ID 0), show ready-to-scan state
+  showReadyToScanState();
+
+  // Ensure we're in LISTENING state
+  changeSystemState(LISTENING, "Returned to welcome screen");
+
+  Serial.println("Successfully returned to welcome screen");
 }
 
 // Helper function to darken a 16-bit color
-uint16_t darkenColor(uint16_t color) {
-    uint8_t r = (color >> 11) & 0x1F;
-    uint8_t g = (color >> 5) & 0x3F;
-    uint8_t b = color & 0x1F;
+uint16_t darkenColor(uint16_t color)
+{
+  uint8_t r = (color >> 11) & 0x1F;
+  uint8_t g = (color >> 5) & 0x3F;
+  uint8_t b = color & 0x1F;
 
-    r >>= 2; // Divide by 4 to make it darker
-    g >>= 2;
-    b >>= 2;
+  r >>= 2; // Divide by 4 to make it darker
+  g >>= 2;
+  b >>= 2;
 
-    return (r << 11) | (g << 5) | b;
+  return (r << 11) | (g << 5) | b;
 }
 
 // Draws a vertical gradient background based on the Pokemon's primary type
-void drawBackgroundGradient(uint16_t typeColor) {
-    uint16_t startColor = darkenColor(typeColor);
-    uint16_t endColor = ILI9341_BLACK;
+void drawBackgroundGradient(uint16_t typeColor)
+{
+  uint16_t startColor = darkenColor(typeColor);
+  uint16_t endColor = ILI9341_BLACK;
 
-    int16_t startR = (startColor >> 11) & 0x1F;
-    int16_t startG = (startColor >> 5) & 0x3F;
-    int16_t startB = startColor & 0x1F;
+  int16_t startR = (startColor >> 11) & 0x1F;
+  int16_t startG = (startColor >> 5) & 0x3F;
+  int16_t startB = startColor & 0x1F;
 
-    int16_t endR = (endColor >> 11) & 0x1F;
-    int16_t endG = (endColor >> 5) & 0x3F;
-    int16_t endB = endColor & 0x1F;
+  int16_t endR = (endColor >> 11) & 0x1F;
+  int16_t endG = (endColor >> 5) & 0x3F;
+  int16_t endB = endColor & 0x1F;
 
-    for (int16_t y = 0; y < tft.height(); y++) {
-        float ratio = (float)y / tft.height();
-        uint8_t r = (uint8_t)(startR + (endR - startR) * ratio);
-        uint8_t g = (uint8_t)(startG + (endG - startG) * ratio);
-        uint8_t b = (uint8_t)(startB + (endB - startB) * ratio);
-        tft.drawFastHLine(0, y, tft.width(), (r << 11) | (g << 5) | b);
-    }
+  for (int16_t y = 0; y < tft.height(); y++)
+  {
+    float ratio = (float)y / tft.height();
+    uint8_t r = (uint8_t)(startR + (endR - startR) * ratio);
+    uint8_t g = (uint8_t)(startG + (endG - startG) * ratio);
+    uint8_t b = (uint8_t)(startB + (endB - startB) * ratio);
+    tft.drawFastHLine(0, y, tft.width(), (r << 11) | (g << 5) | b);
+  }
 }
 
 // Draws the new styled header
-void drawHeader(const String& name, int id) {
-    tft.setTextColor(ILI9341_WHITE);
-    
-    // Draw Name, left aligned
-    tft.setTextSize(3);
-    tft.setCursor(15, 20);
-    tft.print(name);
+void drawHeader(const String &name, int id)
+{
+  tft.setTextColor(ILI9341_WHITE);
 
-    // Draw ID, right aligned
-    tft.setTextSize(2);
-    char idText[8];
-    snprintf(idText, sizeof(idText), "#%03d", id);
-    int16_t idWidth = strlen(idText) * 12; // text size 2 = 12px width per char
-    tft.setCursor(tft.width() - idWidth - 15, 22);
-    tft.print(idText);
+  // Draw Name, left aligned
+  tft.setTextSize(3);
+  tft.setCursor(15, 20);
+  tft.print(name);
+
+  // Draw ID, right aligned
+  tft.setTextSize(2);
+  char idText[8];
+  snprintf(idText, sizeof(idText), "#%03d", id);
+  int16_t idWidth = strlen(idText) * 12; // text size 2 = 12px width per char
+  tft.setCursor(tft.width() - idWidth - 15, 22);
+  tft.print(idText);
 }
 
 // Draws the new styled footer
-void drawFooter(float height, float weight) {
-    int16_t footerY = 245;
-    int16_t boxWidth = 100;
-    int16_t boxHeight = 50;
-    int16_t spacing = 20;
-    int16_t startX = (tft.width() - (2 * boxWidth + spacing)) / 2;
-    char valueText[16];
-    int16_t textWidth;
-    int16_t textX;
+void drawFooter(float height, float weight)
+{
+  int16_t footerY = 245;
+  int16_t boxWidth = 100;
+  int16_t boxHeight = 50;
+  int16_t spacing = 20;
+  int16_t startX = (tft.width() - (2 * boxWidth + spacing)) / 2;
+  char valueText[16];
+  int16_t textWidth;
+  int16_t textX;
 
-    // Draw Height Box
-    tft.fillRoundRect(startX, footerY, boxWidth, boxHeight, 5, 0x3186); // Dark blue-gray
-    tft.drawRoundRect(startX, footerY, boxWidth, boxHeight, 5, ILI9341_WHITE);
-    
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(1);
-    tft.setCursor(startX + 28, footerY + 10);
-    tft.print("HEIGHT");
+  // Draw Height Box
+  tft.fillRoundRect(startX, footerY, boxWidth, boxHeight, 5, 0x3186); // Dark blue-gray
+  tft.drawRoundRect(startX, footerY, boxWidth, boxHeight, 5, ILI9341_WHITE);
 
-    snprintf(valueText, sizeof(valueText), "%.1f m", height);
-    tft.setTextSize(2);
-    textWidth = strlen(valueText) * 12; // size 2 font is 12px wide
-    textX = startX + (boxWidth - textWidth) / 2;
-    tft.setCursor(textX, footerY + 25);
-    tft.print(valueText);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(1);
+  tft.setCursor(startX + 28, footerY + 10);
+  tft.print("HEIGHT");
 
-    // Draw Weight Box
-    startX += boxWidth + spacing;
-    tft.fillRoundRect(startX, footerY, boxWidth, boxHeight, 5, 0x3186); // Dark blue-gray
-    tft.drawRoundRect(startX, footerY, boxWidth, boxHeight, 5, ILI9341_WHITE);
+  snprintf(valueText, sizeof(valueText), "%.1f m", height);
+  tft.setTextSize(2);
+  textWidth = strlen(valueText) * 12; // size 2 font is 12px wide
+  textX = startX + (boxWidth - textWidth) / 2;
+  tft.setCursor(textX, footerY + 25);
+  tft.print(valueText);
 
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(1);
-    tft.setCursor(startX + 28, footerY + 10);
-    tft.print("WEIGHT");
+  // Draw Weight Box
+  startX += boxWidth + spacing;
+  tft.fillRoundRect(startX, footerY, boxWidth, boxHeight, 5, 0x3186); // Dark blue-gray
+  tft.drawRoundRect(startX, footerY, boxWidth, boxHeight, 5, ILI9341_WHITE);
 
-    snprintf(valueText, sizeof(valueText), "%.1f kg", weight);
-    tft.setTextSize(2);
-    textWidth = strlen(valueText) * 12; // size 2 font is 12px wide
-    textX = startX + (boxWidth - textWidth) / 2;
-    tft.setCursor(textX, footerY + 25);
-    tft.print(valueText);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(1);
+  tft.setCursor(startX + 28, footerY + 10);
+  tft.print("WEIGHT");
+
+  snprintf(valueText, sizeof(valueText), "%.1f kg", weight);
+  tft.setTextSize(2);
+  textWidth = strlen(valueText) * 12; // size 2 font is 12px wide
+  textX = startX + (boxWidth - textWidth) / 2;
+  tft.setCursor(textX, footerY + 25);
+  tft.print(valueText);
 }
 
 // Pokemon資訊顯示函數 - 使用SD卡載入的currentPokemon資料
@@ -1341,60 +1389,70 @@ void displayDynamicPokemonData()
   }
 }
 
-
 // GIF回調函數 - 在TFT上繪製GIF幀
-void GIFDraw(GIFDRAW *pDraw) {
-    if (!pDraw) return;
+void GIFDraw(GIFDRAW *pDraw)
+{
+  if (!pDraw)
+    return;
 
-    uint8_t *pPixels = pDraw->pPixels;
-    uint16_t *pPalette = pDraw->pPalette;
+  uint8_t *pPixels = pDraw->pPixels;
+  uint16_t *pPalette = pDraw->pPalette;
 
-    // To fix ghosting, the canvas is cleared before drawing the first line of a frame.
-    // This was the original fix from the changelog and is more reliable than other checks.
-    if (pDraw->y == 0) {
-        tft.fillRect(g_xOffset, g_yOffset, g_canvasWidth, g_canvasHeight, ILI9341_BLACK);
+  // To fix ghosting, the canvas is cleared before drawing the first line of a frame.
+  // This was the original fix from the changelog and is more reliable than other checks.
+  if (pDraw->y == 0)
+  {
+    tft.fillRect(g_xOffset, g_yOffset, g_canvasWidth, g_canvasHeight, ILI9341_BLACK);
+  }
+
+  // Scaling factors
+  float scaleX = (float)g_canvasWidth / g_origWidth;
+  float scaleY = (float)g_canvasHeight / g_origHeight;
+
+  // Calculate destination drawing parameters based on the partial update's position and size
+  int16_t destX = g_xOffset + (int16_t)(pDraw->iX * scaleX);
+  int16_t destY_start = g_yOffset + (int16_t)((pDraw->iY + pDraw->y) * scaleY);
+  int16_t destY_end = g_yOffset + (int16_t)((pDraw->iY + pDraw->y + 1) * scaleY);
+  int16_t destW = (int16_t)(pDraw->iWidth * scaleX);
+
+  if (destW <= 0)
+    return; // Nothing to draw
+
+  // Create a buffer for the scaled partial line
+  uint16_t scaledLineBuffer[destW];
+
+  // Generate the scaled line of pixels for the partial width
+  for (int x = 0; x < destW; x++)
+  {
+    int src_x = (int)(x / scaleX);
+    if (src_x >= pDraw->iWidth)
+      src_x = pDraw->iWidth - 1;
+
+    uint8_t idx = pPixels[src_x];
+    uint16_t color;
+
+    if (pDraw->ucHasTransparency && idx == pDraw->ucTransparent)
+    {
+      color = ILI9341_BLACK; // Render transparent pixels as black
     }
-
-    // Scaling factors
-    float scaleX = (float)g_canvasWidth / g_origWidth;
-    float scaleY = (float)g_canvasHeight / g_origHeight;
-
-    // Calculate destination drawing parameters based on the partial update's position and size
-    int16_t destX = g_xOffset + (int16_t)(pDraw->iX * scaleX);
-    int16_t destY_start = g_yOffset + (int16_t)((pDraw->iY + pDraw->y) * scaleY);
-    int16_t destY_end = g_yOffset + (int16_t)((pDraw->iY + pDraw->y + 1) * scaleY);
-    int16_t destW = (int16_t)(pDraw->iWidth * scaleX);
-
-    if (destW <= 0) return; // Nothing to draw
-
-    // Create a buffer for the scaled partial line
-    uint16_t scaledLineBuffer[destW];
-
-    // Generate the scaled line of pixels for the partial width
-    for (int x = 0; x < destW; x++) {
-        int src_x = (int)(x / scaleX);
-        if (src_x >= pDraw->iWidth) src_x = pDraw->iWidth - 1;
-
-        uint8_t idx = pPixels[src_x];
-        uint16_t color;
-
-        if (pDraw->ucHasTransparency && idx == pDraw->ucTransparent) {
-            color = ILI9341_BLACK; // Render transparent pixels as black
-        } else {
-            color = pPalette[idx];
-        }
-        scaledLineBuffer[x] = color;
+    else
+    {
+      color = pPalette[idx];
     }
+    scaledLineBuffer[x] = color;
+  }
 
-    // Draw the scaled partial line buffer multiple times for vertical scaling
-    tft.startWrite();
-    for (int y = destY_start; y < destY_end; y++) {
-        if (y < (g_yOffset + g_canvasHeight)) { // Ensure we don't draw outside the canvas
-            tft.setAddrWindow(destX, y, destW, 1);
-            tft.writePixels(scaledLineBuffer, destW);
-        }
+  // Draw the scaled partial line buffer multiple times for vertical scaling
+  tft.startWrite();
+  for (int y = destY_start; y < destY_end; y++)
+  {
+    if (y < (g_yOffset + g_canvasHeight))
+    { // Ensure we don't draw outside the canvas
+      tft.setAddrWindow(destX, y, destW, 1);
+      tft.writePixels(scaledLineBuffer, destW);
     }
-    tft.endWrite();
+  }
+  tft.endWrite();
 }
 
 // 從記憶體播放GIF動畫
@@ -1664,15 +1722,6 @@ bool initESPNOW_PowerOptimized()
 {
   Serial.println("正在初始化ESP-NOW...");
 
-  // 在螢幕上顯示初始化狀態
-  tft.fillRect(0, 280, 240, 40, ILI9341_BLACK);
-  tft.setTextColor(ILI9341_YELLOW);
-  tft.setTextSize(1);
-  tft.setCursor(10, 285);
-  tft.println("Initializing ESP-NOW...");
-  tft.setCursor(10, 300);
-  tft.println("Please wait...");
-
   safeDelay(100);
 
   // 設定 Wi-Fi 模式
@@ -1694,16 +1743,6 @@ bool initESPNOW_PowerOptimized()
   {
     Serial.println("ESP-NOW 初始化失敗");
     Serial.printf("錯誤代碼: 0x%x\n", initResult);
-
-    // 顯示失敗狀態
-    tft.fillRect(0, 280, 240, 40, ILI9341_BLACK);
-    tft.setTextColor(ILI9341_RED);
-    tft.setTextSize(1);
-    tft.setCursor(10, 285);
-    tft.println("ESP-NOW init FAILED");
-    tft.setCursor(10, 300);
-    tft.print("Error: 0x");
-    tft.println(initResult, HEX);
 
     return false;
   }
@@ -1802,38 +1841,12 @@ void setup()
     espnowEnabled = true;
     Serial.println("ESP-NOW已成功啟用");
 
-    // 更新螢幕狀態 - 在Pokemon Ball下方顯示就緒狀態
-    tft.fillRect(0, 260, 240, 60, ILI9341_BLACK);
-    tft.setTextColor(ILI9341_GREEN);
-    tft.setTextSize(1);
-
-    // Center the text
-    String readyText = "ESP-NOW Ready!";
-    int16_t readyX = (tft.width() - readyText.length() * 6) / 2;
-    tft.setCursor(readyX, 270);
-    tft.print(readyText);
-
-    String scanText = "Scan NFC Pokemon Card";
-    int16_t scanX = (tft.width() - scanText.length() * 6) / 2;
-    tft.setCursor(scanX, 290);
-    tft.print(scanText);
+    // 現在ESP-NOW已就緒，顯示準備掃描狀態
+    showReadyToScanState();
   }
   else
   {
     Serial.println("ESP-NOW啟用失敗");
-    tft.fillRect(0, 260, 240, 60, ILI9341_BLACK);
-    tft.setTextColor(ILI9341_RED);
-    tft.setTextSize(1);
-
-    String errorText = "ESP-NOW Init Failed";
-    int16_t errorX = (tft.width() - errorText.length() * 6) / 2;
-    tft.setCursor(errorX, 270);
-    tft.print(errorText);
-
-    String checkText = "Check Connections";
-    int16_t checkX = (tft.width() - checkText.length() * 6) / 2;
-    tft.setCursor(checkX, 290);
-    tft.print(checkText);
   }
 }
 
@@ -1850,9 +1863,39 @@ void loop()
     return;
   }
 
+  // Handle continuous flashing when in LISTENING state
+  if (shouldFlash && currentState == LISTENING && espnowEnabled)
+  {
+    unsigned long currentTime = millis();
+    if (currentTime - lastFlashTime >= 600) // Flash every 600ms
+    {
+      int16_t ballCenterX = tft.width() / 2;
+      int16_t ballCenterY = 120;
+      int16_t ballRadius = 60;
+
+      if (flashState) // Turn off flash
+      {
+        tft.drawCircle(ballCenterX, ballCenterY, ballRadius + 2, ILI9341_BLACK);
+        tft.drawCircle(ballCenterX, ballCenterY, ballRadius + 4, ILI9341_BLACK);
+        flashState = false;
+      }
+      else // Turn on flash
+      {
+        tft.drawCircle(ballCenterX, ballCenterY, ballRadius + 2, ILI9341_YELLOW);
+        tft.drawCircle(ballCenterX, ballCenterY, ballRadius + 4, ILI9341_YELLOW);
+        flashState = true;
+      }
+
+      lastFlashTime = currentTime;
+    }
+  }
+
   // 安全處理Pokemon顯示請求 - 新版動態載入系統
   if (currentState == LISTENING && pokemonDisplayRequested && !displayBusy)
   {
+    // Disable flashing when displaying Pokemon
+    shouldFlash = false;
+
     pokemonDisplayRequested = false; // 重置標誌
     newDataReceived = false;         // 也重置這個標誌
 
@@ -1885,11 +1928,21 @@ void loop()
     return;
   }
 
-  // 處理舊版本的newDataReceived標誌（fallback）
+  // 處理Pokemon ID 0 home command and other newDataReceived cases
   else if (newDataReceived && !pokemonDisplayRequested)
   {
     newDataReceived = false;
-    Serial.println("Received data without display request flag - possible race condition");
+
+    // Check if this is a home command (Pokemon ID 0)
+    if (requestedPokemonId == 0)
+    {
+      Serial.println("Processing home command (Pokemon ID 0)");
+      returnToWelcomeScreen();
+    }
+    else
+    {
+      Serial.println("Received data without display request flag - possible race condition");
+    }
   }
 
   // 簡單的狀態檢查命令 (除錯用)
