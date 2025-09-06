@@ -19,11 +19,11 @@
 // SD card and JSON support (re-enabled for dynamic loading)
 #include <SD.h>
 #include <ArduinoJson.h>
-// Embedded data storage (no SD card needed)
+// SD card data storage
 #include <Arduino.h>
-// Embedded GIF animation support
+// GIF animation support
 #include <AnimatedGIF.h>
-// No more SD card or JSON dependencies!
+// SD card and JSON dependencies for dynamic Pokemon data loading
 
 // 定義TFT引腳 (CS=GPIO5, DC=GPIO2, RST=GPIO4)
 #define TFT_CS 5
@@ -39,8 +39,7 @@
 #define GIF_AREA_X ((240 - GIF_AREA_SIZE) / 2)
 #define GIF_AREA_Y 85 // Adjusted for new layout
 
-// Embedded Pokemon data removed - now using SD card JSON files only
-// (Previous embedded data was for testing only)
+// Pokemon data loaded dynamically from SD card JSON files
 
 // Test sprite data removed - using GIF-only mode
 
@@ -121,7 +120,7 @@ int16_t g_canvasHeight = 0;
 int16_t g_origWidth = 0;
 int16_t g_origHeight = 0;
 
-// Pokemon data lookup removed - now using currentPokemon loaded from SD card JSON
+// Pokemon data loaded from SD card JSON files into currentPokemon structure
 // All Pokemon data access goes through loadAndDisplayPokemon() -> currentPokemon
 
 // findPokemonSprite function removed - using GIF-only mode
@@ -610,7 +609,7 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
   // 避免在中斷中進行Serial輸出
 }
 
-// GIF support removed - using embedded data only
+// GIF files loaded from SD card
 
 // Pokemon type colors (RGB565 format)
 struct TypeColor
@@ -1004,22 +1003,44 @@ void drawBackgroundGradient(uint16_t typeColor)
   }
 }
 
-// Draws the new styled header
+// Draws the new styled header with dynamic text sizing to prevent overlap
 void drawHeader(const String &name, int id)
 {
   tft.setTextColor(ILI9341_WHITE);
 
-  // Draw Name, left aligned
-  tft.setTextSize(3);
-  tft.setCursor(15, 20);
-  tft.print(name);
-
-  // Draw ID, right aligned
+  // Calculate ID position first (right aligned)
   tft.setTextSize(2);
   char idText[8];
   snprintf(idText, sizeof(idText), "#%03d", id);
   int16_t idWidth = strlen(idText) * 12; // text size 2 = 12px width per char
-  tft.setCursor(tft.width() - idWidth - 15, 22);
+  int16_t idStartX = tft.width() - idWidth - 15;
+  
+  // Calculate available width for name (with 10px buffer)
+  int16_t nameStartX = 15;
+  int16_t availableWidth = idStartX - nameStartX - 10;
+  
+  // Determine appropriate text size for name based on length and available space
+  int nameTextSize = 3; // Default to largest size
+  int16_t nameWidth = name.length() * 18; // textSize 3 = ~18px per char
+  
+  if (nameWidth > availableWidth) {
+    nameTextSize = 2; // Try medium size
+    nameWidth = name.length() * 12; // textSize 2 = 12px per char
+    
+    if (nameWidth > availableWidth) {
+      nameTextSize = 1; // Use smallest size
+      nameWidth = name.length() * 6; // textSize 1 = 6px per char
+    }
+  }
+  
+  // Draw Name with calculated text size
+  tft.setTextSize(nameTextSize);
+  tft.setCursor(nameStartX, 20);
+  tft.print(name);
+
+  // Draw ID (already calculated position)
+  tft.setTextSize(2);
+  tft.setCursor(idStartX, 22);
   tft.print(idText);
 }
 
@@ -1814,13 +1835,13 @@ void setup()
   runDiagnostics();
 #endif
 
-  // 無需SD卡初始化！使用嵌入式資料
-  Serial.println("Using embedded Pokemon data - no SD card needed!");
+  // SD卡將在需要時動態初始化
+  Serial.println("Using dynamic SD card loading for Pokemon data");
 
   // 恢復背光
   digitalWrite(TFT_LED, HIGH);
 
-  // 只設置TFT CS腳位，無需SD卡腳位
+  // 設置TFT CS腳位，SD卡CS腳位將在loadPokemonFromSD()中初始化
   pinMode(TFT_CS, OUTPUT);
   digitalWrite(TFT_CS, HIGH);
 
@@ -1831,7 +1852,7 @@ void setup()
   // 等一下再更新狀態，先讓用戶看到歡迎畫面
   safeDelayWithMemCheck(1000, "welcome_display");
 
-  Serial.println("Embedded data test complete, enabling ESP-NOW...");
+  Serial.println("Welcome screen display complete, enabling ESP-NOW...");
   safeDelayWithMemCheck(1000, "display_delay");
 
   // 啟用ESP-NOW (無SD卡衝突)
@@ -1981,12 +2002,12 @@ void runDiagnostics()
   tft.setCursor(0, 100);
   tft.println("SD Card: DISABLED");
   tft.setCursor(0, 140);
-  tft.println("Using embedded data");
+  tft.println("Using SD card data");
 
   Serial.println("--- SIMPLIFIED DIAG START ---");
   Serial.println("TFT display test completed");
-  Serial.println("SD card diagnostics skipped (using embedded data)");
-  Serial.println("System is using embedded Pokemon database");
+  Serial.println("SD card will be initialized when Pokemon data is requested");
+  Serial.println("System uses dynamic SD card loading for Pokemon database");
   Serial.println("--- SIMPLIFIED DIAG END ---");
 
   // halt here to avoid repeating
