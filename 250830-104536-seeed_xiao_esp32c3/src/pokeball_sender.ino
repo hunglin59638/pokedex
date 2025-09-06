@@ -30,7 +30,7 @@ typedef struct struct_message {
 struct_message myData;
 esp_now_peer_info_t peerInfo;
 
-void OnDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   Serial.print("\r\n傳送狀態: ");
   if (status == ESP_NOW_SEND_SUCCESS) {
     Serial.println("資料傳送成功");
@@ -220,10 +220,14 @@ void loop() {
     
     int pokemonId = getPokemonIdFromCard();
 
-    if (pokemonId > 0) {
+    if (pokemonId >= 0) {
       myData.pokemon_id = pokemonId;
       Serial.print("成功解析寶可夢 ID: ");
       Serial.println(myData.pokemon_id);
+      
+      if (pokemonId == 0) {
+        Serial.println("偵測到返回首頁命令 (ID: 0)");
+      }
       
       Serial.println("正在透過 ESP-NOW 發送...");
       esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
