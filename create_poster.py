@@ -315,18 +315,40 @@ def create_pokemon_poster():
 
         print(f"Completed row {row}, up to Pokemon #{ pokemon_id-1}")
 
-    # Save the poster
-    output_path = "pokemon_poster_A1.png"
-    print(f"\nSaving poster...")
-    poster.save(output_path, "PNG", optimize=True)
+    # Save the poster in multiple formats
+    base_filename = "pokemon_poster_A1"
+    output_paths = []
 
-    print(f"\n✅ Poster created successfully!")
-    print(f"📁 File: {output_path}")
+    print("\nSaving poster in multiple formats...")
+
+    # Save as PNG (with transparency support)
+    png_path = f"{base_filename}.png"
+    poster.save(png_path, "PNG", optimize=True)
+    output_paths.append(png_path)
+    print(f"✅ PNG saved: {png_path}")
+
+    # Save as TIFF (high quality, lossless)
+    tif_path = f"{base_filename}.tif"
+    poster.save(tif_path, "TIFF", compression="lzw")
+    output_paths.append(tif_path)
+    print(f"✅ TIFF saved: {tif_path}")
+
+    # Save as JPEG (smaller file size, but convert to RGB first)
+    jpg_path = f"{base_filename}.jpg"
+    # Convert to RGB for JPEG (removes transparency)
+    poster_rgb = Image.new("RGB", poster.size, BACKGROUND_COLOR)
+    poster_rgb.paste(poster, mask=poster.split()[-1] if poster.mode == "RGBA" else None)
+    poster_rgb.save(jpg_path, "JPEG", quality=95, optimize=True)
+    output_paths.append(jpg_path)
+    print(f"✅ JPEG saved: {jpg_path}")
+
+    print("\n✅ Poster created successfully in 3 formats!")
+    print(f"📁 Files: {', '.join(output_paths)}")
     print(f"📏 Size: {poster.size[0]}x{poster.size[1]} pixels")
     print(f"📐 Physical: {WIDTH_CM}x{HEIGHT_CM} cm at {DPI} DPI")
     print(f"🔢 Pokemon included: {min(pokemon_id-1, 151)}")
 
-    return output_path
+    return output_paths
 
 
 if __name__ == "__main__":
