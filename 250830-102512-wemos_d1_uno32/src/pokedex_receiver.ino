@@ -438,19 +438,10 @@ bool loadPokemonJSON(int pokemon_id)
     return false;
   }
 
-  // 讀取JSON內容
-  String jsonContent = "";
-  while (jsonFile.available())
-  {
-    jsonContent += (char)jsonFile.read();
-  }
-  jsonFile.close();
-
-  // Raw JSON debug print removed.
-
   // 解析JSON
   JsonDocument doc;
-  DeserializationError error = deserializeJson(doc, jsonContent);
+  DeserializationError error = deserializeJson(doc, jsonFile);
+  jsonFile.close(); // Close file after parsing
 
   if (error)
   {
@@ -1014,25 +1005,27 @@ void drawHeader(const String &name, int id)
   snprintf(idText, sizeof(idText), "#%03d", id);
   int16_t idWidth = strlen(idText) * 12; // text size 2 = 12px width per char
   int16_t idStartX = tft.width() - idWidth - 15;
-  
+
   // Calculate available width for name (with 10px buffer)
   int16_t nameStartX = 15;
   int16_t availableWidth = idStartX - nameStartX - 10;
-  
+
   // Determine appropriate text size for name based on length and available space
-  int nameTextSize = 3; // Default to largest size
+  int nameTextSize = 3;                   // Default to largest size
   int16_t nameWidth = name.length() * 18; // textSize 3 = ~18px per char
-  
-  if (nameWidth > availableWidth) {
-    nameTextSize = 2; // Try medium size
+
+  if (nameWidth > availableWidth)
+  {
+    nameTextSize = 2;               // Try medium size
     nameWidth = name.length() * 12; // textSize 2 = 12px per char
-    
-    if (nameWidth > availableWidth) {
-      nameTextSize = 1; // Use smallest size
+
+    if (nameWidth > availableWidth)
+    {
+      nameTextSize = 1;              // Use smallest size
       nameWidth = name.length() * 6; // textSize 1 = 6px per char
     }
   }
-  
+
   // Draw Name with calculated text size
   tft.setTextSize(nameTextSize);
   tft.setCursor(nameStartX, 20);
