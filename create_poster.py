@@ -99,10 +99,9 @@ def create_pokemon_poster():
     POKEMON_SIZE_BOTTOM = min(GRID_WIDTH // BOTTOM_COLS - 15, ROW_HEIGHT - 85)
 
     # Colors - Pokemon theme
-    BACKGROUND_COLOR = (245, 250, 255)  # Light blue
-    BORDER_COLOR = (59, 76, 202)  # Deep Indigo
+    BACKGROUND_COLOR = (252, 250, 245)
+    BORDER_COLOR = (60, 90, 150)
     TEXT_COLOR = (50, 50, 50)  # Dark gray
-    TITLE_COLOR = (220, 20, 60)  # Pokemon red
 
     print(
         f"Pokemon sizes - Row1: {POKEMON_SIZE_ROW1}px, Middle: {POKEMON_SIZE_MIDDLE}px, Bottom: {POKEMON_SIZE_BOTTOM}px"
