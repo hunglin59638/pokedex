@@ -10,16 +10,23 @@ Total: 151 Pokemon perfectly arranged
 
 import json
 import os
+import argparse
 from PIL import Image, ImageDraw, ImageFont
 import math
 
 
-def load_pokemon_data(pokemon_id):
-    """Load Pokemon data from JSON file"""
+def load_pokemon_data(pokemon_id, lang="en"):
+    """Load Pokemon data from JSON file with language support"""
     json_path = f"pokemon/{pokemon_id}.json"
     if os.path.exists(json_path):
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
+            # Try to get the name in the specified language
+            if "names" in data and isinstance(data["names"], dict):
+                name = data["names"].get(lang)
+                if name:
+                    return name
+            # Fallback to default name field
             return data.get("name", f"Pokemon #{pokemon_id}")
     return f"Pokemon #{pokemon_id}"
 
@@ -63,7 +70,7 @@ def paste_pokeball_logo(poster, x, y, width, height):
         print(f"Error pasting Pokeball logo: {e}")
 
 
-def create_pokemon_poster():
+def create_pokemon_poster(lang="en"):
     """Create optimized Pokemon poster 60x90cm"""
     # Poster specifications for A1 size at 300 DPI
     DPI = 300
@@ -190,7 +197,7 @@ def create_pokemon_poster():
                     poster.paste(pokemon_img, (img_x, img_y), pokemon_img)
 
                     # Add Pokemon number and name on same line with proper spacing
-                    pokemon_name = load_pokemon_data(current_pokemon)
+                    pokemon_name = load_pokemon_data(current_pokemon, lang)
                     combined_text = f"#{current_pokemon:03d} {pokemon_name}"
                     text_bbox = draw.textbbox((0, 0), combined_text, font=name_font)
                     text_width = text_bbox[2] - text_bbox[0]
@@ -241,7 +248,7 @@ def create_pokemon_poster():
                     poster.paste(pokemon_img, (img_x, img_y), pokemon_img)
 
                     # Add Pokemon number and name on same line with better spacing
-                    pokemon_name = load_pokemon_data(pokemon_id)
+                    pokemon_name = load_pokemon_data(pokemon_id, lang)
                     combined_text = f"#{pokemon_id:03d} {pokemon_name}"
                     text_bbox = draw.textbbox((0, 0), combined_text, font=name_font)
                     text_width = text_bbox[2] - text_bbox[0]
@@ -294,7 +301,7 @@ def create_pokemon_poster():
                     poster.paste(pokemon_img, (img_x, img_y), pokemon_img)
 
                     # Add Pokemon number and name on same line with better spacing
-                    pokemon_name = load_pokemon_data(pokemon_id)
+                    pokemon_name = load_pokemon_data(pokemon_id, lang)
                     combined_text = f"#{pokemon_id:03d} {pokemon_name}"
                     text_bbox = draw.textbbox((0, 0), combined_text, font=name_font)
                     text_width = text_bbox[2] - text_bbox[0]
@@ -350,5 +357,22 @@ def create_pokemon_poster():
     return output_paths
 
 
+def main():
+    """Main function with argument parsing"""
+    parser = argparse.ArgumentParser(
+        description="Create a Pokemon poster with all 151 original Pokemon"
+    )
+    parser.add_argument(
+        "--lang", "-l",
+        default="en",
+        help="Language for Pokemon names (default: en). Use language codes like 'en', 'ja', 'zh', etc."
+    )
+
+    args = parser.parse_args()
+
+    print(f"Creating poster with Pokemon names in language: {args.lang}")
+    create_pokemon_poster(lang=args.lang)
+
+
 if __name__ == "__main__":
-    create_pokemon_poster()
+    main()

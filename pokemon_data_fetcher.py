@@ -2,6 +2,8 @@ import os
 import json
 import argparse
 import requests
+import subprocess
+import shutil
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -22,6 +24,62 @@ def make_session():
     s.mount("http://", adapter)
     s.headers.update({"User-Agent": "pokedex-data-fetcher/1.0"})
     return s
+
+
+def compress_gif(gif_path):
+    """
+    Compresses a GIF using gifsicle if it's over 110KB.
+    Recursively compresses with smaller sizes if still over 100KB.
+    Overwrites the original file.
+    """
+    if not shutil.which("gifsicle"):
+        print("--> gifsicle not found, skipping compression.")
+        return
+
+    try:
+        file_size = os.path.getsize(gif_path)
+        if file_size > 110 * 1024:
+            print(f"--> GIF is {(file_size / 1024):.1f}KB, compressing...")
+
+            # Try different heights: 50, then 40 if still over 100KB
+            heights = [50, 40]
+            
+            for height in heights:
+                command = [
+                    "gifsicle",
+                    "--resize-height",
+                    str(height),
+                    "-o",
+                    gif_path,  # gifsicle can overwrite with -o
+                    gif_path,
+                ]
+
+                result = subprocess.run(command, capture_output=True, text=True)
+
+                if result.returncode == 0:
+                    compressed_size = os.path.getsize(gif_path)
+                    print(
+                        f"--> Successfully compressed to {(compressed_size / 1024):.1f}KB (height: {height}px)."
+                    )
+                    
+                    # If under 100KB, we're done
+                    if compressed_size <= 100 * 1024:
+                        break
+                    # If this was the last attempt, we're done regardless
+                    elif height == heights[-1]:
+                        break
+                    else:
+                        print(f"--> Still over 100KB, trying smaller size...")
+                else:
+                    print(f"--> gifsicle failed for {gif_path}: {result.stderr}")
+                    break
+        else:
+            pass
+
+    except FileNotFoundError:
+        print(f"--> Error: GIF file not found at {gif_path} for compression.")
+    except Exception as e:
+        print(f"--> An error occurred during compression: {e}")
 
 
 def extract_pokemon_info(data, species_data=None):
@@ -144,6 +202,8 @@ def fetch_pokemon_data(session, pokemon_url, skip_existing=True):
             print(
                 f"Downloaded data and GIF for {pokemon_id} ({pokemon_info.get('name')})"
             )
+            # Compress GIF if it's too large
+            compress_gif(gif_path)
         else:
             print(
                 f"Failed to download GIF for {pokemon_id} ({pokemon_info.get('name')}) - URL: {gif_url}"
