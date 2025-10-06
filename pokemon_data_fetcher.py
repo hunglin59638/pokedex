@@ -43,7 +43,7 @@ def compress_gif(gif_path):
 
             # Try different heights: 50, then 40 if still over 100KB
             heights = [50, 40]
-            
+
             for height in heights:
                 command = [
                     "gifsicle",
@@ -61,7 +61,7 @@ def compress_gif(gif_path):
                     print(
                         f"--> Successfully compressed to {(compressed_size / 1024):.1f}KB (height: {height}px)."
                     )
-                    
+
                     # If under 100KB, we're done
                     if compressed_size <= 100 * 1024:
                         break
@@ -240,8 +240,8 @@ def main():
     parser.add_argument(
         "--start",
         type=int,
-        default=0,
-        help="Start index in the full pokemon list (0-based)",
+        default=1,
+        help="Starting Pokemon ID (1-based, e.g., 1 for Bulbasaur)",
     )
     parser.add_argument(
         "--skip-existing",
@@ -256,15 +256,16 @@ def main():
     total = len(all_entries)
     print(f"Total pokemon entries (including forms): {total}")
 
-    start = max(0, args.start)
+    # Convert 1-based to 0-based index for Python list
+    start_index = max(0, args.start - 1)
     limit = args.limit if args.limit > 0 else total
 
-    end = min(total, start + limit)
+    end_index = min(total, start_index + limit)
 
-    for idx in range(start, end):
+    for idx in range(start_index, end_index):
         entry = all_entries[idx]
         url = entry.get("url")
-        print(f"Processing {idx+1}/{end}: {entry.get('name')} -> {url}")
+        print(f"Processing {idx+1}/{end_index}: {entry.get('name')} -> {url}")
         try:
             fetch_pokemon_data(session, url, skip_existing=args.skip_existing)
         except Exception as e:
