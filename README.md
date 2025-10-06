@@ -13,7 +13,8 @@ A physical Pokemon Pokedex that displays animated Pokemon GIFs on a TFT screen w
 - **Physical Poster**: Optional A1-size poster with 151 original Pokemon
 - **Dual Language Support**: Pokemon names in multiple languages
 
-<video src="assets/pokedex.mp4" height="480" controls></video>
+<video src="https://github.com/user-attachments/assets/87f4468a-dbbc-4f44-bd77-43db51d7032a
+" height="480" controls></video>
 
 ## Usage
 
